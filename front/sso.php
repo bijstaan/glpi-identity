@@ -139,9 +139,26 @@ try {
 
     // Ask userinfo only for what is missing. The groups claim is the usual
     // gap — several providers keep it out of the id token entirely.
+    //
+    // The union is written this way round on purpose: `+` keeps the left
+    // operand on collision, so the verified id token has to be on the left. A
+    // userinfo response is an ordinary JSON body with no signature over it, and
+    // it must be able to add the claim we came for without being able to
+    // restate `sub`, the login claim or the address. OIDC Core §5.3.2 asks for
+    // the subject check as well, and it is the check that makes the rest of the
+    // response safe to read at all.
     $groups_claim = (string) $source->fields['claim_groups'];
     if ($groups_claim !== '' && !isset($claims[$groups_claim])) {
-        $claims = Flow::userinfo($source, (string) ($tokens['access_token'] ?? '')) + $claims;
+        $extra = Flow::userinfo($source, (string) ($tokens['access_token'] ?? ''));
+
+        if (($extra['sub'] ?? null) === ($claims['sub'] ?? null)) {
+            $claims += $extra;
+        } elseif ($extra !== []) {
+            EventLog::record(EventLog::SSO_DENIED, $source, [
+                'error'  => true,
+                'detail' => 'The userinfo response was for a different subject than the id token; ignored.',
+            ]);
+        }
     }
 } catch (OidcException $e) {
     EventLog::record(EventLog::SSO_DENIED, $source, ['error' => true, 'detail' => $e->getMessage()]);

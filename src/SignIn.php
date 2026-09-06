@@ -9,6 +9,7 @@ namespace GlpiPlugin\Glpiidentity;
 use Auth;
 use Session;
 use User;
+use UserEmail;
 
 /**
  * Turning verified claims into a signed-in GLPI session.
@@ -40,7 +41,20 @@ final class SignIn
         $link = Link::forSubject($source->getID(), $subject);
 
         if ($link === null) {
-            $link = self::adopt($source, $username, $subject);
+            // `email_verified` is absent from plenty of perfectly good tokens,
+            // so its absence cannot mean "unverified" — but a provider that
+            // sends it as false is telling us the user typed that address
+            // themselves, which is exactly the case adoption must not trust.
+            $verified = !array_key_exists('email_verified', $claims)
+                || filter_var($claims['email_verified'], FILTER_VALIDATE_BOOLEAN);
+
+            $adopted = self::adopt($source, $username, $subject, $email, $verified);
+
+            if ($adopted['refusal'] !== null) {
+                return self::refuse($source, $username, $adopted['refusal']);
+            }
+
+            $link = $adopted['link'];
         }
 
         if ($link === null) {
@@ -125,36 +139,105 @@ final class SignIn
     }
 
     /**
-     * Adopt an account this source already owns, found by username.
+     * Bind a subject to an account this source already owns but has never seen
+     * sign in — the first SSO login of a SCIM-provisioned user.
      *
-     * Only reachable for a user that already has a link to *this* source: a
-     * person whose subject changed because the directory was rebuilt, which
-     * happens on tenant migrations. An account with no link, or a link to
-     * another source, is never adopted here.
+     * SCIM has no subject to record: {@see Provisioning::createNew()} writes an
+     * empty one, and it stays empty until the person first arrives through SSO.
+     * That first arrival cannot match on (source, subject), so it has to be
+     * matched some other way, and the only other thing in hand is a username.
+     *
+     * A username is not identity. `preferred_username` is neither unique nor
+     * stable (OIDC Core §5.7), plenty of directories let a user edit their own,
+     * and every directory eventually reissues a leaver's login to somebody new.
+     * Matching on it alone would mean whoever presents a given username first
+     * gets that GLPI account — including an administrator's. So it is treated
+     * as a lookup key and never as evidence, and two things are required before
+     * the binding is made:
+     *
+     *  - The link must have no subject yet. An account already bound to a
+     *    subject is never rebound here, whatever username arrives with it. A
+     *    directory that genuinely reissues subjects (a tenant migration, a
+     *    rebuilt IdP) re-establishes them through SCIM, or an administrator
+     *    clears the link by hand; neither is something a login may decide.
+     *  - The provider must corroborate the match with an address the account
+     *    already holds. That is the part the person signing in cannot choose
+     *    for themselves.
+     *
+     * An account with no link, or a link to another source, is still never
+     * adopted — that refusal was already correct and is unchanged.
+     *
+     * @return array{link:?Link,refusal:?string}
      */
-    private static function adopt(Source $source, string $username, string $subject): ?Link
-    {
+    private static function adopt(
+        Source $source,
+        string $username,
+        string $subject,
+        string $email,
+        bool $email_verified
+    ): array {
+        if ($subject === '') {
+            return ['link' => null, 'refusal' => null];
+        }
+
         $user = new User();
         if (!$user->getFromDBbyName($username)) {
-            return null;
+            return ['link' => null, 'refusal' => null];
         }
 
         $link = Link::forUser($source->getID(), (int) $user->getID());
         if ($link === null) {
-            return null;
+            return ['link' => null, 'refusal' => null];
         }
 
-        if ((string) $link->fields['subject'] !== $subject && $subject !== '') {
-            $link->update(['id' => $link->getID(), 'subject' => $subject]);
-
-            EventLog::record(EventLog::SSO_LOGIN, $source, [
-                'users_id' => (int) $user->getID(),
-                'subject'  => $username,
-                'detail'   => 'The provider issued a new subject for an account this source owns; relinked.',
-            ]);
+        if ((string) $link->fields['subject'] !== '') {
+            // Refusing rather than falling through: the account exists, this
+            // source owns it, and it is already bound to somebody. Creating a
+            // second account or silently rebinding this one would both be worse
+            // than stopping and saying so.
+            return [
+                'link'    => null,
+                'refusal' => 'This account is already linked to a different subject at this provider. '
+                    . 'An administrator must clear the link, or the directory must re-provision it, '
+                    . 'before it can be signed into with a new one.',
+            ];
         }
 
-        return $link;
+        if (!$email_verified || !self::holdsAddress($user, $email)) {
+            return [
+                'link'    => null,
+                'refusal' => 'The provider sent no verified address matching this GLPI account, so the '
+                    . 'username alone is not enough to link them.',
+            ];
+        }
+
+        $link->update(['id' => $link->getID(), 'subject' => $subject]);
+
+        EventLog::record(EventLog::SSO_LOGIN, $source, [
+            'users_id' => (int) $user->getID(),
+            'subject'  => $username,
+            'detail'   => 'First sign-in for an account this source provisioned; '
+                . 'subject bound after matching a verified address.',
+        ]);
+
+        return ['link' => $link, 'refusal' => null];
+    }
+
+    /** Does this GLPI account already hold that address? */
+    private static function holdsAddress(User $user, string $email): bool
+    {
+        $email = strtolower(trim($email));
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return false;
+        }
+
+        foreach (getAllDataFromTable(UserEmail::getTable(), ['users_id' => $user->getID()]) as $row) {
+            if (strtolower(trim((string) $row['email'])) === $email) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

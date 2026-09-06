@@ -323,9 +323,15 @@ class Mapping extends CommonDBChild
                . '<th></th></tr></thead><tbody>';
 
             foreach ($rules as $rule) {
+                // `getDropdownName()` returns the row as it is stored, markup and
+                // all — GLPI 11 escapes on output, not on input — so a group name
+                // is attacker-supplied text here: `group` UPDATE is a much more
+                // widely granted right than this page needs, and a SCIM connector
+                // creates groups straight from a `displayName` it was handed. The
+                // badge is ours and stays outside the escape.
                 $target = match ((string) $rule->fields['action']) {
-                    self::ACTION_GROUP   => Dropdown::getDropdownName('glpi_groups', (int) $rule->fields['groups_id']),
-                    self::ACTION_PROFILE => Dropdown::getDropdownName('glpi_profiles', (int) $rule->fields['profiles_id'])
+                    self::ACTION_GROUP   => $e(Dropdown::getDropdownName('glpi_groups', (int) $rule->fields['groups_id'])),
+                    self::ACTION_PROFILE => $e(Dropdown::getDropdownName('glpi_profiles', (int) $rule->fields['profiles_id']))
                         . ((int) $rule->fields['is_dynamic_recursive'] === 1
                             ? ' <span class="badge bg-azure-lt">' . __s('recursive') . '</span>' : ''),
                     default              => $e($rule->fields['field_name']) . ' = ' . $e($rule->fields['field_value']),
