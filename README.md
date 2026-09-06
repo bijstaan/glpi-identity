@@ -198,7 +198,7 @@ because only its hash is stored. A lost token is regenerated, which also revokes
 the old one.
 
 Provider-by-provider walkthroughs — Entra ID, Okta, Google Workspace, Keycloak —
-are in [docs/setup.md](docs/setup.md), including the awkward bits: Entra sends
+are in [docs/setup.md](https://gitlab.rfni.dev/norsewind/glpi-erpnext-mods/-/wikis/glpi-identity/setup), including the awkward bits: Entra sends
 group *GUIDs* in its token by default, and Google sends no groups at all.
 
 ### The login page
@@ -286,7 +286,7 @@ mirrored straight into GLPI's group tree. Mirroring is available and off by
 default: one shared group tree filling up with a dozen organisations' internal
 vocabulary — "All Staff", "All Staff", "All Staff" — helps nobody.
 
-[docs/mapping.md](docs/mapping.md) covers the rule types, the operators, and
+[docs/mapping.md](https://gitlab.rfni.dev/norsewind/glpi-erpnext-mods/-/wikis/glpi-identity/mapping) covers the rule types, the operators, and
 what to do when a provider sends GUIDs instead of names.
 
 ---
@@ -306,7 +306,7 @@ its `sw`/`co` siblings, which is what every connector actually sends when asking
 falls back to listing, while one that gets a *wrong* answer overwrites the wrong
 person.
 
-[docs/scim.md](docs/scim.md) is the reference — endpoints, the exact shapes, the
+[docs/scim.md](https://gitlab.rfni.dev/norsewind/glpi-erpnext-mods/-/wikis/glpi-identity/scim) is the reference — endpoints, the exact shapes, the
 deprovisioning semantics, and what to check when a connector reports something
 unhelpful.
 
