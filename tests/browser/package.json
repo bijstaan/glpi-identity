@@ -1,0 +1,9 @@
+{
+  "name": "glpi-identity-browser-tests",
+  "private": true,
+  "description": "Browser checks for glpi-identity, driven with Playwright against the dev instance.",
+  "license": "GPL-3.0-or-later",
+  "dependencies": {
+    "playwright": "^1.62.1"
+  }
+}

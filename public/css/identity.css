@@ -1,0 +1,107 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Copyright (C) 2026 Bijstaan */
+/* The sign-in additions on GLPI's login page. */
+
+.glpiidentity-divider {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    margin: 1rem 0;
+    color: var(--tblr-secondary, #6c757d);
+    font-size: .875rem;
+}
+
+.glpiidentity-divider::before,
+.glpiidentity-divider::after {
+    content: "";
+    flex: 1;
+    border-top: 1px solid var(--tblr-border-color, #dee2e6);
+}
+
+.glpiidentity-realm .form-label {
+    font-size: .875rem;
+    margin-bottom: .25rem;
+}
+
+/* The mapping list: a rule reads left to right, so keep it from wrapping
+   mid-condition on a narrow screen. */
+.glpiidentity-mappings table code {
+    white-space: nowrap;
+}
+
+/* ----------------------------------------------------------------- dark theme
+ *
+ * Core declares `.text-muted { color: var(--tblr-muted) !important; }`, so a
+ * scoped PROPERTY override is a silent no-op (this plugin shipped exactly
+ * that on 2026-08-21; auror_dark still measured 3.34:1). The fix is
+ * redefining the VARIABLE inside our scope — core's !important then resolves
+ * against our value. `.form-text` keys to `--tblr-secondary-color`, a Tabler
+ * literal no GLPI dark palette redefines; both variables move together.
+ * transparent 10% of --tblr-body-color measures ~4.9:1 on auror_dark's card
+ * surface (28% undershoots at 3.75:1). Never self-reference a token in its
+ * own redefinition — circular, silently invalid.
+ *
+ * `.glpiidentity-scope` is the wrapper Source::showForm()/Mapping::showForm()
+ * emit around their core-rendered forms; without it these rules structurally
+ * cannot reach those pages' .form-text.
+ */
+:root[data-glpi-theme-dark="1"] .glpiidentity-config,
+:root[data-glpi-theme-dark="1"] .glpiidentity-scope,
+:root[data-glpi-theme-dark="1"] .glpiidentity-mappings {
+    --tblr-muted: color-mix(in srgb, var(--tblr-body-color), transparent 10%);
+    --tblr-secondary-color: color-mix(in srgb, var(--tblr-body-color), transparent 10%);
+}
+
+/* Fixed status colours re-checked per theme: Tabler's .text-red (!important)
+ * measures 2.95:1 on auror_dark; the -lt badge inks sit just under the floor
+ * (green measured 4.31:1). Property overrides with matching !important. */
+:root[data-glpi-theme-dark="1"] .glpiidentity-config .text-red,
+:root[data-glpi-theme-dark="1"] .glpiidentity-scope .text-red {
+    color: color-mix(in srgb, var(--tblr-red, #d63939), white 40%) !important;
+}
+
+:root[data-glpi-theme-dark="1"] .glpiidentity-config .badge.bg-green-lt {
+    color: color-mix(in srgb, var(--tblr-green, #2fb344), white 35%) !important;
+}
+
+/* Core styles <code> with its own accent ink and no dark variant — measured
+ * 2.12:1 on the source form's discovery hints. Dark-scoped so the light
+ * theme keeps core's look. */
+:root[data-glpi-theme-dark="1"] .glpiidentity-config code,
+:root[data-glpi-theme-dark="1"] .glpiidentity-scope code,
+:root[data-glpi-theme-dark="1"] .glpiidentity-mappings code {
+    color: var(--tblr-body-color);
+}
+
+/* Core-wide gaps inside our scope, same family and same lift as the other
+ * plugins in this sweep: the "Delete permanently" purge control (2.95:1), the
+ * select2 remove glyph on dark chips (~1.1:1), and the form header's
+ * opacity-dimmed "Child entities" label (~3.6:1 measured on the mapping
+ * form). */
+:root[data-glpi-theme-dark="1"] .glpiidentity-config .btn-outline-danger,
+:root[data-glpi-theme-dark="1"] .glpiidentity-scope .btn-outline-danger,
+:root[data-glpi-theme-dark="1"] .glpiidentity-config .btn-ghost-danger,
+:root[data-glpi-theme-dark="1"] .glpiidentity-scope .btn-ghost-danger {
+    color: color-mix(in srgb, var(--tblr-danger, #d63939), white 40%);
+    border-color: color-mix(in srgb, var(--tblr-danger, #d63939), white 40%);
+}
+
+:root[data-glpi-theme-dark="1"] .glpiidentity-config .select2-container
+  .select2-selection.select2-selection--multiple .select2-selection__rendered
+  .select2-selection__choice .select2-selection__choice__remove,
+:root[data-glpi-theme-dark="1"] .glpiidentity-scope .select2-container
+  .select2-selection.select2-selection--multiple .select2-selection__rendered
+  .select2-selection__choice .select2-selection__choice__remove {
+    color: color-mix(in srgb, var(--tblr-body-color), transparent 5%);
+}
+
+:root[data-glpi-theme-dark="1"] .glpiidentity-config .form-check-label,
+:root[data-glpi-theme-dark="1"] .glpiidentity-scope .form-check-label {
+    opacity: 1;
+    color: color-mix(in srgb, var(--tblr-body-color), transparent 6%);
+}
+
+:root[data-glpi-theme-dark="1"] .glpiidentity-config .is_recursive-toggle .form-check-label,
+:root[data-glpi-theme-dark="1"] .glpiidentity-scope .is_recursive-toggle .form-check-label {
+    color: color-mix(in srgb, var(--tblr-body-color), white 15%) !important;
+}
