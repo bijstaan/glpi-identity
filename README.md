@@ -197,9 +197,9 @@ Press **Generate a token** for SCIM — it is displayed once and never again,
 because only its hash is stored. A lost token is regenerated, which also revokes
 the old one.
 
-Provider-by-provider walkthroughs — Entra ID, Okta, Google Workspace, Keycloak —
-are in [docs/setup.md](https://gitlab.rfni.dev/norsewind/glpi-erpnext-mods/-/wikis/glpi-identity/setup), including the awkward bits: Entra sends
-group *GUIDs* in its token by default, and Google sends no groups at all.
+Entra ID, Okta, Google Workspace and Keycloak have all been set up against this,
+including the awkward bits: Entra sends group *GUIDs* in its token by default,
+and Google sends no groups at all.
 
 ### The login page
 
@@ -286,9 +286,6 @@ mirrored straight into GLPI's group tree. Mirroring is available and off by
 default: one shared group tree filling up with a dozen organisations' internal
 vocabulary — "All Staff", "All Staff", "All Staff" — helps nobody.
 
-[docs/mapping.md](https://gitlab.rfni.dev/norsewind/glpi-erpnext-mods/-/wikis/glpi-identity/mapping) covers the rule types, the operators, and
-what to do when a provider sends GUIDs instead of names.
-
 ---
 
 ## SCIM
@@ -305,10 +302,6 @@ its `sw`/`co` siblings, which is what every connector actually sends when asking
 `invalidFilter` rather than guessed at: a connector that gets an honest 400
 falls back to listing, while one that gets a *wrong* answer overwrites the wrong
 person.
-
-[docs/scim.md](https://gitlab.rfni.dev/norsewind/glpi-erpnext-mods/-/wikis/glpi-identity/scim) is the reference — endpoints, the exact shapes, the
-deprovisioning semantics, and what to check when a connector reports something
-unhelpful.
 
 ---
 
@@ -358,9 +351,6 @@ src/Oidc/Flow.php    the authorisation-code flow and the checks that make it an
 src/Scim/            the SCIM server: routing, filters, resources, schemas
 front/sso.php        start and callback
 front/scim.php       the SCIM endpoint
-docs/setup.md        per-provider walkthroughs
-docs/scim.md         the SCIM reference
-docs/mapping.md      mapping rules in depth
 ```
 
 ### Two GLPI details worth knowing if you extend this
