@@ -28,6 +28,7 @@ use Glpi\Http\Firewall;
 use Glpi\Http\SessionManager;
 use Glpi\Plugin\Hooks;
 use GlpiPlugin\Glpiidentity\IdpGroup;
+use GlpiPlugin\Glpiidentity\Link;
 use GlpiPlugin\Glpiidentity\Mapping;
 use GlpiPlugin\Glpiidentity\Source;
 
@@ -59,6 +60,7 @@ function plugin_init_glpiidentity()
     // never being called — the tab simply does not appear, with no error.
     Plugin::registerClass(Mapping::class, ['addtabon' => [Source::class]]);
     Plugin::registerClass(IdpGroup::class, ['addtabon' => [Source::class]]);
+    Plugin::registerClass(Link::class, ['addtabon' => [Source::class]]);
 
     /**
      * Two paths that must run without a GLPI session, for opposite reasons.

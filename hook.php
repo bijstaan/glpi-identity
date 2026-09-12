@@ -75,6 +75,9 @@ function plugin_glpiidentity_install()
                 `scim_token_hash` CHAR(64) NOT NULL DEFAULT '',
                 `scim_token_hint` VARCHAR(16) NOT NULL DEFAULT '',
                 `deprovision_action` VARCHAR(20) NOT NULL DEFAULT 'disable',
+                -- 0 means never. The fallback for a source with no SCIM
+                -- connector, which otherwise never hears that anyone has left.
+                `idle_disable_days` INT UNSIGNED NOT NULL DEFAULT 0,
                 `date_lastscim` TIMESTAMP NULL DEFAULT NULL,
                 `scim_requests` INT UNSIGNED NOT NULL DEFAULT 0,
 
@@ -196,6 +199,17 @@ function plugin_glpiidentity_install()
         );
     }
 
+    // Columns added after a table already existed somewhere. The install hook
+    // runs on upgrade too, and the CREATE TABLE above is skipped once the table
+    // is there — so a new column that only appears in the CREATE is a column
+    // that only ever appears on a fresh install.
+    if (!$DB->fieldExists(Source::getTable(), 'idle_disable_days')) {
+        $DB->doQuery(
+            "ALTER TABLE `" . Source::getTable() . "`
+                ADD `idle_disable_days` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `deprovision_action`"
+        );
+    }
+
     CronTask::register(
         Source::class,
         'discovery',
@@ -206,6 +220,22 @@ function plugin_glpiidentity_install()
             'allowmode'     => CronTask::MODE_EXTERNAL,
             'logs_lifetime' => 30,
             'comment'       => 'Refresh each identity provider\'s OpenID Connect metadata',
+        ]
+    );
+
+    // Registered as `idledisable` because CronTask builds the callable as
+    // `<itemtype>::cron<name>` — the method is cronIdleDisable(), and PHP
+    // method names are case-insensitive.
+    CronTask::register(
+        Source::class,
+        'idledisable',
+        DAY_TIMESTAMP,
+        [
+            'state'         => CronTask::STATE_WAITING,
+            'mode'          => CronTask::MODE_EXTERNAL,
+            'allowmode'     => CronTask::MODE_EXTERNAL,
+            'logs_lifetime' => 30,
+            'comment'       => 'Deactivate accounts that have stopped signing in, on sources that set a limit',
         ]
     );
 

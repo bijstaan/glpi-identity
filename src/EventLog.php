@@ -42,6 +42,11 @@ class EventLog extends CommonDBTM
     // Placement
     public const MAPPED = 'mapped';
 
+    // Linking, and the lifecycle that has nothing to tell it what to do
+    public const LINK_INVITED = 'link_invited';
+    public const LINK_CLEARED = 'link_cleared';
+    public const IDLE_DISABLE = 'idle_disable';
+
     public static function getTable($classname = null)
     {
         return self::TABLE;

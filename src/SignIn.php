@@ -167,6 +167,11 @@ final class SignIn
      * An account with no link, or a link to another source, is still never
      * adopted — that refusal was already correct and is unchanged.
      *
+     * Where the username does not match, {@see adoptInvited()} takes over. The
+     * two routes differ only in what stands in for the username: an
+     * administrator's explicit invitation, which is a stronger statement than a
+     * name collision anyway.
+     *
      * @return array{link:?Link,refusal:?string}
      */
     private static function adopt(
@@ -182,12 +187,12 @@ final class SignIn
 
         $user = new User();
         if (!$user->getFromDBbyName($username)) {
-            return ['link' => null, 'refusal' => null];
+            return self::adoptInvited($source, $subject, $email, $email_verified);
         }
 
         $link = Link::forUser($source->getID(), (int) $user->getID());
         if ($link === null) {
-            return ['link' => null, 'refusal' => null];
+            return self::adoptInvited($source, $subject, $email, $email_verified);
         }
 
         if ((string) $link->fields['subject'] !== '') {
@@ -217,6 +222,82 @@ final class SignIn
             'users_id' => (int) $user->getID(),
             'subject'  => $username,
             'detail'   => 'First sign-in for an account this source provisioned; '
+                . 'subject bound after matching a verified address.',
+        ]);
+
+        return ['link' => $link, 'refusal' => null];
+    }
+
+    /**
+     * Bind a sign-in to an account an administrator invited this source to adopt.
+     *
+     * The username route above only fires when the GLPI account happens to be
+     * named the way the provider names people, and for the accounts that most
+     * need adopting it is not: an MSP's GLPI is full of contacts created by
+     * hand or by a mail collector, named `jsmith` or `J. Smith`, while the
+     * provider sends an email address. Those are exactly the people whose first
+     * sign-in is otherwise refused for a username conflict.
+     *
+     * So the invitation stands in for the name. Two facts are still required
+     * and neither is the person's to supply:
+     *
+     *  - an administrator linked this account to this source and nobody has
+     *    signed into it since ({@see Link::invite()});
+     *  - the provider sends a verified address the account already holds.
+     *
+     * Which puts the bar at "can receive mail at an address this account
+     * already has" — the same bar as GLPI's own password reset, and reached
+     * only for an account somebody deliberately offered up.
+     *
+     * Two invited accounts holding the same address is refused rather than
+     * guessed at. It is a duplicate that wants merging, and picking one of them
+     * would bind a person to whichever row happened to be first.
+     *
+     * @return array{link:?Link,refusal:?string}
+     */
+    private static function adoptInvited(
+        Source $source,
+        string $subject,
+        string $email,
+        bool $email_verified
+    ): array {
+        if ($subject === '' || $email === '' || !$email_verified) {
+            return ['link' => null, 'refusal' => null];
+        }
+
+        $matches = [];
+        foreach (Link::invitations($source->getID()) as $invitation) {
+            $user = $invitation->user();
+            if ($user === null || (int) $user->fields['is_deleted'] === 1) {
+                continue;
+            }
+
+            if (self::holdsAddress($user, $email)) {
+                $matches[] = [$invitation, $user];
+            }
+        }
+
+        if (count($matches) > 1) {
+            return [
+                'link'    => null,
+                'refusal' => 'More than one account linked to this source holds that address, so '
+                    . 'there is no way to tell which of them signed in. An administrator must '
+                    . 'merge or unlink the duplicates.',
+            ];
+        }
+
+        if ($matches === []) {
+            return ['link' => null, 'refusal' => null];
+        }
+
+        [$link, $user] = $matches[0];
+
+        $link->update(['id' => $link->getID(), 'subject' => $subject]);
+
+        EventLog::record(EventLog::SSO_LOGIN, $source, [
+            'users_id' => (int) $user->getID(),
+            'subject'  => (string) $user->fields['name'],
+            'detail'   => 'First sign-in for an account linked to this source by an administrator; '
                 . 'subject bound after matching a verified address.',
         ]);
 

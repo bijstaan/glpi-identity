@@ -103,6 +103,7 @@ class Source extends CommonDBTM
         $this->fields['claim_lastname']     = 'family_name';
         $this->fields['claim_groups']       = 'groups';
         $this->fields['deprovision_action'] = self::DEPROVISION_DISABLE;
+        $this->fields['idle_disable_days']  = 0;
         $this->fields['mirror_groups']      = 0;
     }
 
@@ -434,8 +435,9 @@ class Source extends CommonDBTM
     public static function cronInfo(string $name): array
     {
         return match ($name) {
-            'discovery' => ['description' => __('Refresh identity provider metadata', 'glpiidentity')],
-            default     => [],
+            'discovery'   => ['description' => __('Refresh identity provider metadata', 'glpiidentity')],
+            'idledisable' => ['description' => __('Deactivate accounts that have stopped signing in', 'glpiidentity')],
+            default       => [],
         };
     }
 
@@ -456,6 +458,82 @@ class Source extends CommonDBTM
         }
 
         return $changed > 0 ? 1 : 0;
+    }
+
+    /**
+     * Deactivate accounts that have stopped signing in.
+     *
+     * The gap this fills: {@see Provisioning::deprovision()} only ever runs
+     * from a SCIM request, so a source whose customer has no connector never
+     * hears that somebody has left. Their account stays active for ever. That
+     * matters less than it sounds while the provider still refuses them — and
+     * a great deal when the account is a licence, a name in every picker and a
+     * mailbox that still gets notifications.
+     *
+     * Three deliberate limits, each of which is the difference between a
+     * useful task and one an administrator has to turn off again:
+     *
+     *  - **Only links that have been used.** A link with no last login is an
+     *    invitation nobody has taken up, and a contact who has been in GLPI for
+     *    six years should not be deactivated because an invitation written last
+     *    month went unanswered.
+     *  - **Every link the user holds, not just this one.** A consultant who
+     *    signs in through a second customer's directory is not idle, and
+     *    disabling them because this one has not seen them lately would be a
+     *    lockout with no cause.
+     *  - **Deactivate, never bin**, whatever `deprovision_action` says. "Has
+     *    not signed in lately" is a weaker claim than "the directory says they
+     *    are gone", and it is a claim this plugin is making on its own rather
+     *    than repeating.
+     */
+    public static function cronIdleDisable(CronTask $task): int
+    {
+        $disabled = 0;
+
+        foreach (self::listWhere(['is_active' => 1]) as $source) {
+            $days = (int) ($source->fields['idle_disable_days'] ?? 0);
+            if ($days <= 0) {
+                continue;
+            }
+
+            $cutoff = date('Y-m-d H:i:s', time() - ($days * DAY_TIMESTAMP));
+
+            foreach (Link::forSource($source->getID()) as $link) {
+                if ((string) ($link->fields['date_lastlogin'] ?? '') === '') {
+                    continue;
+                }
+
+                if (Link::lastLoginAnywhere((int) $link->fields['users_id']) >= $cutoff) {
+                    continue;
+                }
+
+                $user = $link->user();
+                if (
+                    $user === null
+                    || (int) $user->fields['is_active'] !== 1
+                    || (int) $user->fields['is_deleted'] === 1
+                ) {
+                    continue;
+                }
+
+                $user->update(['id' => $user->getID(), 'is_active' => 0]);
+
+                EventLog::record(EventLog::IDLE_DISABLE, $source, [
+                    'users_id' => (int) $user->getID(),
+                    'subject'  => (string) $user->fields['name'],
+                    'detail'   => sprintf(
+                        'Deactivated after %d days without a sign-in (last was %s).',
+                        $days,
+                        (string) $link->fields['date_lastlogin']
+                    ),
+                ]);
+
+                $task->addVolume(1);
+                $disabled++;
+            }
+        }
+
+        return $disabled > 0 ? 1 : 0;
     }
 
     // ------------------------------------------------------------- validation
@@ -561,6 +639,26 @@ class Source extends CommonDBTM
             }
 
             $input['issuer'] = $issuer;
+        }
+
+        if (isset($input['discovery_url'])) {
+            $url = trim((string) $input['discovery_url']);
+
+            // The same rule as the issuer, for a stronger reason: every
+            // endpoint the sign-in uses comes out of the document this URL
+            // returns, so whoever can answer it decides where a browser is sent
+            // to type a password. No exception for loopback, and no comparison
+            // with the stored value — unlike the issuer, nothing writes this
+            // field back, so re-checking it costs nothing.
+            if ($url !== '' && !str_starts_with(strtolower($url), 'https://')) {
+                return $refuse(__('A metadata URL must use https.', 'glpiidentity'));
+            }
+
+            $input['discovery_url'] = $url;
+        }
+
+        if (isset($input['idle_disable_days'])) {
+            $input['idle_disable_days'] = max(0, (int) $input['idle_disable_days']);
         }
 
         if (
@@ -738,6 +836,22 @@ class Source extends CommonDBTM
                . 'the endpoints come from there — you do not fill them in by hand.', 'glpiidentity')
            . '</div></td></tr>';
 
+        echo $row() . '<td>' . __s('Metadata URL', 'glpiidentity') . "</td><td colspan='3'>";
+        echo Html::input('discovery_url', [
+            'value'       => $this->fields['discovery_url'],
+            'size'        => 80,
+            'placeholder' => __('Only for a provider that publishes it somewhere else', 'glpiidentity'),
+        ]);
+        echo "<div class='form-text'>"
+           . __s('Leave this empty for a provider that publishes its metadata under the issuer, '
+               . 'which is nearly all of them. Azure AD B2C is the exception you will actually '
+               . 'meet: its document lives under the user flow rather than under the issuer, at '
+               . 'https://tenant.b2clogin.com/tenant.onmicrosoft.com/B2C_1_signin/v2.0/.well-known/openid-configuration. '
+               . 'Whatever is read here is authoritative — the issuer field above is overwritten '
+               . 'with the one the document declares, which is the value tokens are checked '
+               . 'against.', 'glpiidentity')
+           . '</div></td></tr>';
+
         echo $row() . '<td>' . __s('Client ID', 'glpiidentity') . '</td><td>';
         echo Html::input('client_id', ['value' => $this->fields['client_id'], 'size' => 40]);
         echo '</td><td>' . __s('Client secret', 'glpiidentity') . '</td><td>';
@@ -853,6 +967,22 @@ class Source extends CommonDBTM
         echo "<div class='form-text'>"
            . __s('Never purged either way. A deleted user takes their ticket history out of every '
                . 'report that joins on them.', 'glpiidentity')
+           . '</div></td></tr>';
+
+        echo $row() . '<td>' . __s('Deactivate after (days idle)', 'glpiidentity') . "</td><td colspan='3'>";
+        echo Html::input('idle_disable_days', [
+            'type'  => 'number',
+            'min'   => '0',
+            'max'   => '3650',
+            'value' => $this->fields['idle_disable_days'],
+            'style' => 'max-width: 8rem',
+        ]);
+        echo "<div class='form-text'>"
+           . __s('0 — the default — deactivates nobody. Set it for a source whose customer has no '
+               . 'SCIM connector, because without one nothing will ever tell this GLPI that '
+               . 'somebody has left. Only accounts that have actually signed in are considered, '
+               . 'somebody still signing in through another source is left alone, and the account '
+               . 'is deactivated rather than binned whatever the setting above says.', 'glpiidentity')
            . '</div></td></tr>';
 
         if ($new) {

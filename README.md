@@ -197,9 +197,48 @@ Press **Generate a token** for SCIM — it is displayed once and never again,
 because only its hash is stored. A lost token is regenerated, which also revokes
 the old one.
 
+A provider that publishes its metadata somewhere other than under its issuer
+needs the **Metadata URL** filled in instead. Azure AD B2C is the one you will
+actually meet: its document lives under the user flow rather than under the
+issuer, and the issuer it then declares is a third URL again. Whatever the
+document says is authoritative — the issuer field is overwritten from it, which
+is the value tokens are checked against.
+
 Entra ID, Okta, Google Workspace and Keycloak have all been set up against this,
 including the awkward bits: Entra sends group *GUIDs* in its token by default,
 and Google sends no groups at all.
+
+### Accounts that already exist
+
+An MSP's GLPI is full of customer contacts before any of this is switched on —
+created by hand, or by whatever collects mail into tickets. The first time one
+of them signs in through their provider, the sign-in is refused: a GLPI account
+with that username already exists and no link says this source owns it. That
+refusal is correct, and it is the same one that stops a directory provisioning
+itself an account called `admin`.
+
+The **Identity links** tab on a source is where that is answered. It lists what
+the source owns, and underneath it the accounts in the source's entity that hold
+an email address and belong to nobody yet. Ticking them — or *Link all listed* —
+records an invitation: this directory is the owner of this person.
+
+An invitation grants nothing on its own. It is claimed the first time somebody
+signs in through that provider presenting a **verified address the account
+already holds**, and never again afterwards; a link that has been bound once is
+never rebound by a login. So an account changes hands only when an administrator
+and the provider both say so, which puts the bar at the same place GLPI's own
+password reset puts it.
+
+Two accounts invited with the same address is refused rather than guessed at.
+That is a duplicate that wants merging, and picking one of them would bind a
+person to whichever row happened to be first.
+
+The same tab has the answer to the other half of that story. A link bound to a
+subject that no longer exists — a tenant migration, a rebuilt IdP, a person
+deleted and recreated in the directory — is **reopened**, which clears the
+subject and leaves the invitation for the next sign-in to claim. **Unlinking**
+is the other direction: the source no longer owns the account at all, and
+signing in through it is refused the way it would be for anyone else's.
 
 ### The login page
 
@@ -303,6 +342,30 @@ its `sw`/`co` siblings, which is what every connector actually sends when asking
 falls back to listing, while one that gets a *wrong* answer overwrites the wrong
 person.
 
+### When there is no connector
+
+Deprovisioning only ever happens because a SCIM request asked for it, so a
+source whose customer has no connector — Azure AD B2C and Zitadel are both
+service providers rather than provisioning clients, and Google Workspace needs
+a paid tier — never hears that anybody has left. Their account stays active for
+ever. That matters less than it sounds while the provider still refuses them,
+and a great deal when the account is a licence, a name in every picker, and a
+mailbox that still gets notifications.
+
+**Deactivate after (days idle)** on a source is the answer, and it is off — `0`
+— until somebody sets it. What it does is narrower than it sounds, deliberately:
+
+- only accounts that have **actually signed in** are considered, so an
+  invitation nobody has taken up never deactivates a contact who has been in
+  GLPI for years;
+- the last sign-in is taken across **every** source the person is linked to, so
+  a consultant who works for two of your customers is not idle because one of
+  them has not seen them;
+- they are **deactivated, never binned**, whatever *When a user is
+  deprovisioned* says. "Has not signed in lately" is a weaker statement than
+  "the directory says they are gone", and it is one this plugin is making on its
+  own rather than repeating.
+
 ---
 
 ## Tests
@@ -335,7 +398,7 @@ docker compose -p glpi exec glpi sh -c 'cd /var/www/glpi/plugins/glpiidentity &&
 ```
 setup.php            hooks, the firewall exemption and the stateless-path
                      declaration that SCIM needs
-hook.php             install/uninstall: six tables, one right, two cron tasks
+hook.php             install/uninstall: six tables, one right, three cron tasks
 src/Source.php       one customer's identity configuration — the unit everything
                      else is scoped through
 src/Link.php         the fact that a GLPI user came from a source; the reason
