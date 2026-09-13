@@ -11,10 +11,14 @@
 //
 // It also captures the screenshots used in docs/.
 const { chromium } = require('playwright');
+const fs = require('fs');
+const path = require('path');
+const { openDark, audit } = require('./dark');
 const { fullPage } = require('./shot');
 
 const BASE = 'http://localhost:8081';
 const SHOTS = process.env.SHOT_DIR || '.';
+const DARK_SHOTS = path.join(SHOTS, 'dark');
 const IDP = 'http://127.0.0.1:9097';
 
 const fail = [];
@@ -194,6 +198,12 @@ const save = async (page, button = 'update') => {
 
   check('the sign-in block renders for a ready source',
     (await guest.locator('.glpiidentity-sso').count()) === 1);
+
+  // The two login captures the README uses. They were taken by hand once and
+  // then went stale — they still showed GLPI's own logo and "GLPI internal
+  // database" on a whitelabelled instance — so they are taken here, in the very
+  // states this section already puts the page into.
+  await fullPage(guest, `${SHOTS}/identity-05-login.png`);
   // The default is the email box and nothing else. The house provider is
   // reachable through it — an address matching no customer domain falls back
   // there — so a button would be a second route to the same place.
@@ -333,6 +343,9 @@ const save = async (page, button = 'update') => {
   check('single sign-on is still offered', await loginPageHas('.glpiidentity-sso'));
   check('with a way back to a local account', await loginPageHas('.glpiidentity-localhint'));
 
+  await guest.goto(`${BASE}/index.php`, { waitUntil: 'networkidle' });
+  await fullPage(guest, `${SHOTS}/identity-06-login-sso-only.png`);
+
   check('the escape hatch shows the form again',
     await loginPageHas('#login_name', '?local=1'));
 
@@ -357,6 +370,34 @@ const save = async (page, button = 'update') => {
   check('no server errors or JavaScript errors', problems.length === 0, problems.join(' | '));
 
   console.log('\nThe source and mapping are left for identity-setup.sh to clear.');
+
+
+  // --- The dark palette --------------------------------------------------
+  //
+  // The settings page and the source form are this plugin's own markup, so
+  // nothing in GLPI's dark stylesheet covers them. The login page is checked
+  // separately below because it is rendered for somebody with no session at
+  // all, and so cannot be visited as the dark account.
+  fs.mkdirSync(DARK_SHOTS, { recursive: true });
+  console.log('\nswitching to the dark palette...');
+
+  const dark = await openDark(browser, { plugin: 'glpiidentity' });
+
+  for (const [url, name, shot] of [
+    [`${BASE}/plugins/glpiidentity/front/config.php`, 'the settings page', 'identity-dark-01-settings.png'],
+    [`${BASE}/plugins/glpiidentity/front/source.php`, 'the source list', 'identity-dark-02-list.png'],
+  ]) {
+    await dark.goto(url, { waitUntil: 'networkidle' });
+    await dark.waitForTimeout(400);
+    const bad = await audit(dark, 'glpiidentity-');
+    check(`[dark] ${name}: no near-white panel carrying dark-body text`,
+      bad.whiteBg.length === 0, JSON.stringify(bad.whiteBg));
+    check(`[dark] ${name}: muted text meets 4.5:1`,
+      bad.lowContrast.length === 0, JSON.stringify(bad.lowContrast));
+    await fullPage(dark, `${DARK_SHOTS}/${shot}`);
+  }
+
+  check('[dark] no page errors', dark.__darkErrors.length === 0, dark.__darkErrors.join(' | '));
 
   await browser.close();
   console.log(`\n${fail.length ? `FAILED: ${fail.join(', ')}` : 'all checks passed'}`);
