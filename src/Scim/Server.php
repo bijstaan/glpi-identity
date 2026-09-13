@@ -16,7 +16,7 @@ use GlpiPlugin\Glpiidentity\Source;
 use User;
 
 /**
- * SCIM 2.0, for one customer at a time.
+ * SCIM 2.0, for one organisation at a time.
  *
  * Every request authenticates to exactly one {@see Source} before anything else
  * happens, and every query the handlers make is scoped through that source's
@@ -37,7 +37,7 @@ final class Server
         if (!Settings::flag('enabled')) {
             // 503 rather than 401: the credentials may be perfect. A connector
             // seeing 503 retries; one seeing 401 raises a quarantine alert at
-            // the customer.
+            // the organisation.
             return Response::error(503, 'Identity provisioning is switched off on this GLPI instance.');
         }
 
@@ -60,7 +60,7 @@ final class Server
         } catch (\Throwable $e) {
             // A connector needs a SCIM error envelope even for an internal
             // fault; an HTML error page is reported as "the endpoint is not a
-            // SCIM endpoint", which sends the customer looking in the wrong
+            // SCIM endpoint", which sends them looking in the wrong
             // place entirely.
             trigger_error('glpiidentity: SCIM request failed: ' . $e->getMessage(), E_USER_WARNING);
 

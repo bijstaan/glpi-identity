@@ -16,7 +16,7 @@ use UserEmail;
  * The one rule that governs everything here: **never take over an account this
  * source does not already own.** A directory saying "I have a user called
  * jsmith" is not evidence that the existing GLPI user jsmith is theirs — it may
- * be another customer's person, or an administrator. So a username that is
+ * be another organisation's person, or an administrator. So a username that is
  * already taken by somebody outside this source is a conflict reported back to
  * the connector, not an account silently adopted.
  *
@@ -69,8 +69,8 @@ final class Provisioning
      *
      * Order matters, and email is deliberately absent from it. The directory's
      * own identifiers are stable and unambiguous; an address is neither, and a
-     * lookup by address is how one customer's directory ends up owning another
-     * customer's account.
+     * lookup by address is how one organisation's directory ends up owning another
+     * organisation's account.
      */
     private static function locate(Source $source, array $person): ?Link
     {
@@ -101,7 +101,7 @@ final class Provisioning
     /** @return array{link:?Link,created:bool,error:?string} */
     private static function createNew(Source $source, array $person, string $username): array
     {
-        // The collision check that makes this safe to expose to a customer.
+        // The collision check that makes this safe to expose to an outside directory.
         $existing = new User();
         if ($existing->getFromDBbyName($username)) {
             EventLog::record(EventLog::SCIM_DENIED, $source, [

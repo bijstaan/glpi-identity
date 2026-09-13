@@ -8,7 +8,7 @@
  * The SCIM 2.0 endpoint.
  *
  * Reached as `/plugins/glpiidentity/front/scim.php/v2/...`, which is the base
- * URL an administrator pastes into a customer's provisioning configuration.
+ * URL an administrator pastes into an organisation's provisioning configuration.
  *
  * This script runs with GLPI's session check turned off — see the firewall
  * strategy registered in setup.php — because the caller is a directory holding

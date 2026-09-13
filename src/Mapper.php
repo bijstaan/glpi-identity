@@ -119,7 +119,7 @@ final class Mapper
      * Scoped to the source's entity. A rule belonging to Acme can only ever
      * grant a profile *in Acme's entity* — the entity is not something a rule
      * can choose, because a rule that could choose it would be a way for one
-     * customer's directory to place a user in another customer's tree.
+     * organisation's directory to place a user in another's tree.
      *
      * @param array<int,bool> $wanted profiles_id => recursive
      * @return string[]

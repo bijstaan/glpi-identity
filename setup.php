@@ -4,24 +4,24 @@
  * Copyright (C) 2026 Bijstaan
  */
 /**
- * GLPI Identity — OpenID Connect sign-in and SCIM provisioning, per customer.
+ * GLPI Identity — OpenID Connect sign-in and SCIM provisioning, per entity.
  *
- * An MSP's GLPI holds several organisations' people. This plugin lets each of
- * them bring their own identity provider: their users sign in with their own
+ * A GLPI instance can hold several organisations' people. This plugin lets each
+ * of them bring their own identity provider: their users sign in with their own
  * IdP, are provisioned into their own entity by their own SCIM connector, and
  * are placed into GLPI groups and profiles by rules written against the groups
  * and claims their IdP actually sends.
  *
- * The unit of configuration is an {@see Source} — one customer's identity
+ * The unit of configuration is an {@see Source} — one organisation's identity
  * setup — because that is the boundary that matters: a mistake in Acme's
  * mapping must not be able to give an Acme user rights in Beta's entity.
  *
  * OIDC only, no SAML. GLPI already ships league/oauth2-client and
- * firebase/php-jwt, so OIDC costs no new dependency, and every IdP an MSP
- * meets — Entra, Okta, Google, Auth0, Keycloak, JumpCloud — speaks it. SAML
- * would mean vendoring an XML-signature library into a GLPI install, and XML
- * signature verification is the one place where a subtle mistake is a silent
- * authentication bypass rather than an error.
+ * firebase/php-jwt, so OIDC costs no new dependency, and every IdP you are
+ * likely to meet — Entra, Okta, Google, Auth0, Keycloak, JumpCloud — speaks
+ * it. SAML would mean vendoring an XML-signature library into a GLPI install,
+ * and XML signature verification is the one place where a subtle mistake is a
+ * silent authentication bypass rather than an error.
  */
 
 use Glpi\Http\Firewall;
@@ -65,7 +65,7 @@ function plugin_init_glpiidentity()
     /**
      * Two paths that must run without a GLPI session, for opposite reasons.
      *
-     * `front/scim.php` is called by a customer's identity provider, which has a
+     * `front/scim.php` is called by an organisation's identity provider, which has a
      * bearer token and no cookie and never will. `front/sso.php` is where a
      * browser lands *before* it has a session — that is the whole point of it.
      *

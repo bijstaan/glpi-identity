@@ -12,7 +12,7 @@ use Config;
  * Plugin-wide configuration.
  *
  * Almost everything about this plugin is per-source, because almost everything
- * about it is per-customer. What lives here is the small set of decisions that
+ * about it is per-organisation. What lives here is the small set of decisions that
  * are genuinely about the instance rather than about one organisation.
  */
 final class Settings

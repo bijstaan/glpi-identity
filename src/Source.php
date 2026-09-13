@@ -18,7 +18,7 @@ use Profile;
 /**
  * One organisation's identity configuration.
  *
- * A source is the whole of what an MSP needs to know about a customer's
+ * A source is the whole of what you need to know about one organisation's
  * directory: how their people sign in (OpenID Connect), how their accounts
  * arrive (SCIM), and which entity all of it belongs to. It is one record rather
  * than three because that is how the work actually arrives — somebody onboards
@@ -26,8 +26,8 @@ use Profile;
  *
  * Everything downstream is scoped through this object. A SCIM request resolves
  * to a source before it resolves to anything else; a sign-in resolves to a
- * source before a user is looked up. That is what stops one customer's
- * directory from reaching another customer's people, and it is a property of
+ * source before a user is looked up. That is what stops one organisation's
+ * directory from reaching another's people, and it is a property of
  * the structure rather than of remembering to check.
  */
 class Source extends CommonDBTM
@@ -138,7 +138,7 @@ class Source extends CommonDBTM
      * The source that claims an email address's domain.
      *
      * This is home-realm discovery, and it is why `email_domains` is validated
-     * as globally unique on save: two customers claiming the same domain is not
+     * as globally unique on save: two organisations claiming the same domain is not
      * an ambiguity to resolve at sign-in time with a tie-break, it is a
      * misconfiguration that would route one organisation's people into
      * another's entity.
@@ -268,7 +268,7 @@ class Source extends CommonDBTM
         return (string) ($this->fields['scim_token_hash'] ?? '') !== '';
     }
 
-    /** The base URL a customer's IdP should be pointed at. */
+    /** The base URL an organisation's IdP should be pointed at. */
     public function scimBaseUrl(): string
     {
         return Url::absolute('front/scim.php/v2');
@@ -303,7 +303,7 @@ class Source extends CommonDBTM
      * Fetch the provider's metadata document and remember it.
      *
      * Discovery is deliberate rather than lazy. Fetching it on the sign-in that
-     * needs it would put the customer's IdP on the critical path of a page load
+     * needs it would put their IdP on the critical path of a page load
      * twice — once for metadata, once for the token — and a slow provider would
      * look like a slow GLPI. A daily cron and a button cover it, and a stale
      * document is almost always still correct: issuers change endpoints about
@@ -423,7 +423,7 @@ class Source extends CommonDBTM
      * Empty is the default and means the login page shows only the email box —
      * which already routes everyone, including staff, because an address at no
      * claimed domain falls back to the house provider. Filling this in is how
-     * an MSP opts into a one-click path for people who sign in many times a day.
+     * you opt into a one-click path for people who sign in many times a day.
      */
     public function buttonLabel(): string
     {
@@ -464,7 +464,7 @@ class Source extends CommonDBTM
      * Deactivate accounts that have stopped signing in.
      *
      * The gap this fills: {@see Provisioning::deprovision()} only ever runs
-     * from a SCIM request, so a source whose customer has no connector never
+     * from a SCIM request, so a source whose organisation has no connector never
      * hears that somebody has left. Their account stays active for ever. That
      * matters less than it sounds while the provider still refuses them — and
      * a great deal when the account is a licence, a name in every picker and a
@@ -478,7 +478,7 @@ class Source extends CommonDBTM
      *    six years should not be deactivated because an invitation written last
      *    month went unanswered.
      *  - **Every link the user holds, not just this one.** A consultant who
-     *    signs in through a second customer's directory is not idle, and
+     *    signs in through a second organisation's directory is not idle, and
      *    disabling them because this one has not seen them lately would be a
      *    lockout with no cause.
      *  - **Deactivate, never bin**, whatever `deprovision_action` says. "Has
@@ -549,7 +549,7 @@ class Source extends CommonDBTM
     }
 
     /**
-     * The checks that stop one customer's configuration from reaching another's.
+     * The checks that stop one organisation's configuration from reaching another's.
      *
      * Domain uniqueness and the single default are both refusals rather than
      * warnings, because both failures are silent: sign-in would keep working,
@@ -789,7 +789,7 @@ class Source extends CommonDBTM
 
         echo $row() . '<td>' . __s('Name') . " <span class='text-red'>*</span></td><td>";
         echo Html::input('name', ['value' => $this->fields['name'], 'required' => 'required']);
-        echo "<div class='form-text'>" . __s('The customer this directory belongs to.', 'glpiidentity') . '</div>';
+        echo "<div class='form-text'>" . __s('The entity this directory belongs to.', 'glpiidentity') . '</div>';
         echo '</td><td>' . __s('Active') . '</td><td>';
         Dropdown::showYesNo('is_active', $this->fields['is_active']);
         echo "<div class='form-text'>"
@@ -889,9 +889,9 @@ class Source extends CommonDBTM
         ]);
         echo "<div class='form-text'>"
            . __s('Empty — the default — means the login page shows only the email box, which already '
-               . 'routes your own staff: an address matching no customer domain comes here. Fill this '
+               . 'routes your own staff: an address matching no claimed domain comes here. Fill this '
                . 'in to add a one-click button as well, shown as "Sign in with …". Only the house '
-               . 'provider gets one, because a button naming a customer would put their name on a '
+               . 'provider gets one, because a button naming an organisation would put their name on a '
                . 'public page.', 'glpiidentity')
            . '</div>';
         echo '</td></tr>';
@@ -978,7 +978,7 @@ class Source extends CommonDBTM
             'style' => 'max-width: 8rem',
         ]);
         echo "<div class='form-text'>"
-           . __s('0 — the default — deactivates nobody. Set it for a source whose customer has no '
+           . __s('0 — the default — deactivates nobody. Set it for a source whose organisation has no '
                . 'SCIM connector, because without one nothing will ever tell this GLPI that '
                . 'somebody has left. Only accounts that have actually signed in are considered, '
                . 'somebody still signing in through another source is left alone, and the account '

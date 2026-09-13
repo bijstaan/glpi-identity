@@ -9,9 +9,9 @@ namespace GlpiPlugin\Glpiidentity;
 use CommonDBTM;
 
 /**
- * A group a customer's directory has told us about.
+ * A group an organisation's directory has told us about.
  *
- * Deliberately not a GLPI group. A customer's directory is theirs to organise,
+ * Deliberately not a GLPI group. An organisation's directory is theirs to organise,
  * and mirroring every group it mentions would fill one shared group tree with a
  * dozen organisations' internal vocabulary — "All Staff", "All Staff", "All
  * Staff" — none of which a technician wants to see in a dropdown.

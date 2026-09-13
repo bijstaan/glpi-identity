@@ -7,7 +7,7 @@
 /**
  * Instance-wide settings.
  *
- * Deliberately short. Almost every decision this plugin makes is per-customer
+ * Deliberately short. Almost every decision this plugin makes is per-organisation
  * and lives on the source; what is here is the handful that is genuinely about
  * the instance — chiefly the master switch and whether the local password form
  * survives.
@@ -76,7 +76,7 @@ echo '<strong>' . ($ready
     )
     : __s('Identity federation is not active.', 'glpiidentity')) . '</strong>';
 echo "<div class='small'>"
-   . __s('Each customer directory is configured as its own identity source, with its own entity, '
+   . __s('Each organisation is configured as its own identity source, with its own entity, '
        . 'its own credentials and its own group mappings.', 'glpiidentity')
    . '</div>';
 echo '</div></div>';
@@ -142,7 +142,7 @@ echo "<div class='card mb-3'><div class='card-header'><h3 class='card-title'>"
 
 if ($sources === []) {
     echo "<div class='text-muted'>"
-       . __s('No identity sources yet. Add one per customer directory.', 'glpiidentity')
+       . __s('No identity sources yet. Add one per organisation.', 'glpiidentity')
        . '</div>';
 } else {
     echo "<table class='table table-sm'><thead><tr>"

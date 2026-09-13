@@ -233,7 +233,7 @@ final class SignIn
      *
      * The username route above only fires when the GLPI account happens to be
      * named the way the provider names people, and for the accounts that most
-     * need adopting it is not: an MSP's GLPI is full of contacts created by
+     * need adopting it is not: a GLPI instance is full of contacts created by
      * hand or by a mail collector, named `jsmith` or `J. Smith`, while the
      * provider sends an email address. Those are exactly the people whose first
      * sign-in is otherwise refused for a username conflict.

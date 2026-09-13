@@ -15,7 +15,7 @@ use GlpiPlugin\Glpiidentity\Settings;
  * ServiceProviderConfig on setup and adapts to it — it will not send a PATCH to
  * a server that says it cannot patch, and it will not try to sort. Declaring
  * unsupported features honestly is therefore how the unsupported parts stop
- * being a problem, and claiming one that is not implemented is how a customer's
+ * being a problem, and claiming one that is not implemented is how an organisation's
  * sync fails in a way nobody can reproduce.
  */
 final class Schema

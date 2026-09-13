@@ -13,27 +13,27 @@ namespace GlpiPlugin\Glpiidentity;
  * for the house provider.
  *
  * The box alone is enough for everyone, which is why it is the default and the
- * button is not. An address at a claimed domain goes to that customer's
+ * button is not. An address at a claimed domain goes to that organisation's
  * provider; an address at no claimed domain falls back to the house provider.
  * A technician typing their own work address therefore arrives exactly where a
  * "Sign in with us" button would have sent them, so the button is a second
  * route to the same place — and it puts a second primary action next to GLPI's
  * own Sign in, which reads as a choice rather than as a shortcut.
  *
- * It remains available for an MSP whose staff sign in many times a day and
- * would rather click than type: filling in a source's **Button label** turns it
- * on, and only the house provider may have one. A button naming a *customer*
- * would put that customer's name on a public page, which is the disclosure the
+ * It remains available where staff sign in many times a day and would rather
+ * click than type: filling in a source's **Button label** turns it on, and only
+ * the house provider may have one. A button naming another *organisation* would
+ * put that organisation's name on a public page, which is the disclosure the
  * email box exists to avoid.
  *
  * When **Keep the username and password form** is switched off, this also
  * takes GLPI's own login controls off the page — see {@see hideLocalForm()}
  * for what that does and, more importantly, what it does not.
  *
- * The email box is home-realm discovery. A customer's employee does not know
- * which of a dozen identity providers is theirs and should not be shown a list
- * of every organisation the MSP works with — that list is itself a disclosure,
- * a directory of who the customers are. Typing an address is the smallest
+ * The email box is home-realm discovery. Someone at another organisation does
+ * not know which of a dozen identity providers is theirs and should not be shown
+ * a list of every organisation configured here — that list is itself a
+ * disclosure, a directory of who they all are. Typing an address is the smallest
  * question that routes them correctly, and it discloses nothing: an address
  * that matches no configured domain is answered exactly like one that does.
  *

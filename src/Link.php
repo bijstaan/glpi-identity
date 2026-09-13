@@ -22,7 +22,7 @@ use User;
  * So both halves of the plugin resolve through here. SSO matches on
  * (source, subject); SCIM matches on (source, external id) or its own resource
  * id. Neither ever looks a user up by email alone — an email match across
- * sources is how one customer's directory ends up owning another customer's
+ * sources is how one organisation's directory ends up owning another's
  * account, and it would look like an ordinary successful login.
  */
 class Link extends CommonDBTM
@@ -73,7 +73,7 @@ class Link extends CommonDBTM
      * The link for a SCIM resource id — scoped to the calling source.
      *
      * The scoping is the access control, not the unguessability of the id: a
-     * customer asking for a resource id that is not theirs must get a 404, not
+     * caller asking for a resource id that is not theirs must get a 404, not
      * somebody else's user.
      */
     public static function forScimId(int $sources_id, string $scim_id): ?self
@@ -135,7 +135,7 @@ class Link extends CommonDBTM
      * The most recent sign-in a user has made through *any* source.
      *
      * Asked by the idle-disable task, and the reason it asks is a consultant
-     * who works for two of your customers: they are one GLPI user with a link
+     * who works for two of the organisations you support: one GLPI user with a link
      * to each directory, and one of those directories not having seen them
      * lately says nothing about whether they still use GLPI.
      *
@@ -157,10 +157,10 @@ class Link extends CommonDBTM
     /**
      * Invite a source to adopt a GLPI account that already exists.
      *
-     * The problem this solves shows up on the first day of any migration: an
-     * MSP's GLPI is already full of the customer contacts it has been raising
+     * The problem this solves shows up on the first day of any migration: a
+     * GLPI instance is already full of the contacts it has been raising
      * tickets for, created by hand or by an inbound mail collector, and the
-     * first time one of them signs in through the customer's provider the
+     * first time one of them signs in through their provider the
      * plugin quite correctly refuses — a directory does not get to adopt an
      * account it has never owned, because that is how provisioning a user
      * called `admin` becomes a privilege escalation.
@@ -263,8 +263,8 @@ class Link extends CommonDBTM
      * GLPI accounts this source could be invited to adopt.
      *
      * Scoped to the entity the source places people in, because that is where
-     * its people are: an MSP's customer contacts sit in the customer's entity
-     * whatever else is true of them. Accounts with no email address at all are
+     * its people are: an organisation's contacts sit in that organisation's
+     * entity whatever else is true of them. Accounts with no email address at all are
      * left out — adoption needs an address to match against, so listing them
      * would be offering something that could never work.
      *
@@ -577,7 +577,7 @@ class Link extends CommonDBTM
      * Every link a GLPI user has, across sources.
      *
      * More than one is legitimate and worth surfacing: a consultant who is a
-     * user of two customers' directories is one person in GLPI with two
+     * user of two organisations' directories is one person in GLPI with two
      * accounts upstream, and an administrator debugging why their profile keeps
      * changing needs to see both.
      *

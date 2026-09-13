@@ -15,7 +15,7 @@ use User;
 /**
  * A directory group, as SCIM sees it.
  *
- * These are the customer's groups, kept as the customer's groups. What reaches
+ * These are the organisation's groups, kept as the organisation's groups. What reaches
  * GLPI proper is decided by the mappings — that separation is the whole point
  * of the feature, and it is why a SCIM `Group` here does not create a GLPI
  * `Group` unless the source is explicitly told to mirror them.
@@ -96,7 +96,7 @@ final class GroupResource
     /**
      * Mirror a directory group into a real GLPI group, when asked to.
      *
-     * Off by default. A shared group tree filling up with a dozen customers'
+     * Off by default. A shared group tree filling up with a dozen organisations'
      * internal vocabulary helps nobody, and the mapping is the supported way to
      * decide which of a directory's groups deserves to exist in GLPI.
      */

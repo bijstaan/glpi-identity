@@ -60,7 +60,7 @@ final class Request
      * reaches PHP, which is why `REDIRECT_HTTP_AUTHORIZATION` exists and why
      * every library that has ever read a bearer token checks all three. A
      * plugin that checked only the first works in development and fails on one
-     * customer's server for reasons nobody can reproduce.
+     * organisation's server for reasons nobody can reproduce.
      */
     private static function bearerFromHeaders(): string
     {

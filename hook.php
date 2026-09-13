@@ -18,12 +18,12 @@ use GlpiPlugin\Glpiidentity\Source;
  * The shape is worth reading before the SQL. A **source** is one organisation's
  * identity configuration. A **link** is the fact that a particular GLPI user
  * came from that source, and is what makes the whole thing safe to run for
- * several customers at once: SCIM and SSO both resolve through it rather than
+ * several organisations at once: SCIM and SSO both resolve through it rather than
  * by matching on an email address, which changes, is reused, and is not owned
  * by the person who has it.
  *
- * **idpgroups** are the groups a customer's IdP has told us about. They are
- * deliberately not GLPI groups: a customer's directory is theirs to name, and
+ * **idpgroups** are the groups an organisation's IdP has told us about. They are
+ * deliberately not GLPI groups: an organisation's directory is theirs to name, and
  * turning every group it mentions into a GLPI group would fill the group tree
  * with a dozen organisations' internal vocabulary. Mappings translate.
  */
@@ -155,7 +155,7 @@ function plugin_glpiidentity_install()
         // scim_id is a UUID rather than the GLPI user id. Every SCIM query is
         // already scoped to the calling source, so the id is not the control —
         // but an unguessable id means a mistake in that scoping is not also an
-        // information leak about how many users another customer has.
+        // information leak about how many users another organisation has.
         $DB->doQuery(
             "CREATE TABLE `" . Link::getTable() . "` (
                 `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -262,7 +262,7 @@ function plugin_glpiidentity_install()
 /**
  * One right, over the identity sources.
  *
- * Whoever holds it can read a customer's client id, rotate their SCIM token and
+ * Whoever holds it can read an organisation's client id, rotate their SCIM token and
  * decide which of their groups becomes which GLPI profile — which is to say,
  * can grant themselves anything. It is granted to profiles that can already
  * administer configuration, because those profiles could do the same thing the

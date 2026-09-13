@@ -20,8 +20,8 @@ use Profile;
  * Field Services, set their location to the depot."
  *
  * Rules belong to a source rather than to the instance, which is the whole
- * design. GLPI has a perfectly good global authorisation-rules engine, and for
- * an MSP a single global list is the wrong shape: forty customers' rules in one
+ * design. GLPI has a perfectly good global authorisation-rules engine, and a
+ * single global list is the wrong shape here: forty entities' rules in one
  * ordered list, where the isolation between them depends on every rule
  * remembering to test which directory it came from. Here the isolation is
  * structural — a rule cannot see a claim from a directory it does not belong

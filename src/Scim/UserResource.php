@@ -18,7 +18,7 @@ use UserEmail;
  *
  * The translation is small; the care is in what is *not* translated. A SCIM
  * User has fifty attributes and this exposes eight, because every one exposed
- * is one a customer's connector can overwrite, and the useful ones are few:
+ * is one an organisation's connector can overwrite, and the useful ones are few:
  * who they are, whether they still work there, and what to call them.
  */
 final class UserResource
@@ -154,7 +154,7 @@ final class UserResource
     /**
      * Every link this source owns, with its user loaded.
      *
-     * Deliberately joined rather than looped: a customer with four thousand
+     * Deliberately joined rather than looped: an organisation with four thousand
      * people is not unusual, and a connector's first act is to list all of them.
      *
      * @return array<int,array{link:Link,user:User}>

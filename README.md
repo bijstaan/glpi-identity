@@ -1,12 +1,12 @@
 # GLPI Identity
 
-OpenID Connect sign-in and SCIM 2.0 provisioning for GLPI 11, with each customer
-bringing their own identity provider.
+OpenID Connect sign-in and SCIM 2.0 provisioning for GLPI 11, with each entity
+bringing its own identity provider.
 
-An MSP's GLPI holds several organisations' people. Each can sign in with their
-own IdP, be provisioned into their own entity by their own SCIM connector, and
-land in the GLPI groups and profiles that a mapping says their directory's groups
-mean.
+A GLPI instance can hold several organisations' people. Each can sign in with
+their own IdP, be provisioned into their own entity by their own SCIM
+connector, and land in the GLPI groups and profiles that a mapping says their
+directory's groups mean.
 
 No new dependencies: GLPI already ships `league/oauth2-client`,
 `firebase/php-jwt` and `ramsey/uuid`.
@@ -14,7 +14,7 @@ No new dependencies: GLPI already ships `league/oauth2-client`,
 ## Features
 
 - **Sign-in** — OIDC authorisation-code flow with PKCE, against as many providers
-  as you have customers. The login page takes an email address and routes on its
+  as you have organisations. The login page takes an email address and routes on its
   domain; a "house" provider covers your own technicians.
 - **Provisioning** — a SCIM 2.0 endpoint per source, with its own bearer token,
   writing only into that source's entity.
@@ -25,7 +25,7 @@ No new dependencies: GLPI already ships `league/oauth2-client`,
 - **An audit trail** of who signed in, what was provisioned and what was refused.
 - **`identity_status` and `identity_events`** read-only tools for `glpiai`.
 
-OIDC only, no SAML. Every provider an MSP meets speaks OIDC, and SAML would mean
+OIDC only, no SAML. Every provider you are likely to meet speaks OIDC, and SAML would mean
 vendoring an XML-signature library into a GLPI install — and XML signature
 verification is the one place a subtle mistake is a silent authentication bypass
 rather than an error.
@@ -33,14 +33,14 @@ rather than an error.
 ## The safety model
 
 Worth reading before the setup instructions, because it is what makes it safe to
-hand a customer a credential that writes into your GLPI.
+hand an outside organisation a credential that writes into your GLPI.
 
 **Identity is not email.** Addresses change on marriage and rebrand, get reused
 when someone leaves, and belong to whoever controls the domain today. Every
 lookup goes through a *link* — a record that this GLPI user came from that
 source, keyed on the directory's own identifiers (an OIDC `sub`, a SCIM
 `externalId`). Nothing is matched on email alone; an email match across sources
-is how one customer's directory ends up owning another's account, and it would
+is how one organisation's directory ends up owning another's account, and it would
 look like an ordinary successful login.
 
 **A directory never adopts an account it does not own.** A SCIM create naming a
@@ -52,7 +52,7 @@ and the equivalent sign-in is refused. Without that, provisioning a user called
 one source before anything else, and the only way to reach a user is through that
 source's links. Tenant isolation is a property of the structure rather than of
 each handler remembering to filter, and it is tested from the wrong side with one
-customer's token asking for another's people.
+organisation's token asking for another's people.
 
 **Only what the plugin granted can be taken away.** Profiles and groups it
 assigns are marked `is_dynamic` and recomputed on every sign-in and SCIM change.
@@ -111,7 +111,7 @@ Removing the purge turns it red.
 
 ![Instance-wide settings](docs/screenshots/identity-01-settings.png)
 
-**Administration → Identity sources**, one per customer directory:
+**Administration → Identity sources**, one per organisation's directory:
 
 ![An identity source](docs/screenshots/identity-02-source.png)
 
@@ -150,7 +150,7 @@ Google sends no groups at all.
 
 ## Accounts that already exist
 
-An MSP's GLPI is full of customer contacts before any of this is switched on. The
+A GLPI instance is full of contacts before any of this is switched on. The
 first time one signs in through their provider the sign-in is refused: a GLPI
 account with that username exists and no link says this source owns it. That
 refusal is the same one that stops a directory provisioning itself an `admin`.
@@ -178,12 +178,12 @@ direction: the source no longer owns the account.
 ![The login page](docs/screenshots/identity-05-login.png)
 
 One box beside GLPI's own password form. It asks for an email address rather than
-showing a list of providers: that list would be a directory of who your customers
-are, and a customer's employee does not know which of a dozen providers is theirs
-anyway. An address at a claimed domain goes to that customer's provider; one at
+showing a list of providers: that list would be a directory of who your organisations
+are, and their employees do not know which of a dozen providers is theirs
+anyway. An address at a claimed domain goes to that organisation's provider; one at
 no claimed domain falls back to the house provider.
 
-A domain can be claimed by exactly one source, enforced on save. Two customers
+A domain can be claimed by exactly one source, enforced on save. Two organisations
 claiming the same domain is not an ambiguity to break at sign-in time; it is a
 misconfiguration that would route one organisation's people into another's
 entity.
@@ -191,7 +191,7 @@ entity.
 There is no "Sign in with us" button by default — it would be a second primary
 action next to GLPI's own Sign in, which reads as a choice rather than a
 shortcut. Filling in a source's **Button label** adds one. Only the house
-provider can have one; a button naming a customer would put their name on a
+provider can have one; a button naming an organisation would put their name on a
 public page.
 
 ### Single sign-on only
@@ -231,9 +231,9 @@ Every rule that matches applies; this is not first-match-wins. Someone in both
 `Executive` and `IT Staff` gets the VIP group *and* the Technician profile.
 
 Rules belong to a source, not the instance. GLPI has a good global
-authorisation-rules engine, and for an MSP a single global list is the wrong
-shape: forty customers' rules in one ordered list, where the isolation between
-them depends on every rule remembering to test which directory it came from.
+authorisation-rules engine, and a single global list is the wrong shape here:
+forty entities' rules in one ordered list, where the isolation between them
+depends on every rule remembering to test which directory it came from.
 
 Group membership reaches a mapping by two routes and needs only one:
 
@@ -241,7 +241,7 @@ Group membership reaches a mapping by two routes and needs only one:
 - the **directory groups** recorded from SCIM's `/Groups` endpoint.
 
 The second is what makes group mapping work where the first is unavailable, and
-is why SCIM groups are stored as the customer's groups rather than mirrored into
+is why SCIM groups are stored as the organisation's groups rather than mirrored into
 GLPI's group tree. Mirroring is available and off by default: one shared tree
 filling up with a dozen organisations' "All Staff" helps nobody.
 
@@ -261,7 +261,7 @@ wrong answer overwrites the wrong person.
 ### When there is no connector
 
 Deprovisioning only happens because a SCIM request asked for it, so a source
-whose customer has no connector — Azure AD B2C and Zitadel are service providers
+whose organisation has no connector — Azure AD B2C and Zitadel are service providers
 rather than provisioning clients, and Google Workspace needs a paid tier — never
 hears that anybody has left.
 
@@ -271,7 +271,7 @@ somebody sets it. It is narrower than it sounds:
 - only accounts that have **actually signed in** are considered, so an invitation
   nobody took up never deactivates a long-standing contact;
 - the last sign-in is taken across **every** source the person is linked to, so a
-  consultant working for two of your customers is not idle because one has not
+  consultant working for two of the organisations you support is not idle because one has not
   seen them;
 - they are **deactivated, never binned**, whatever *When a user is deprovisioned*
   says. "Has not signed in lately" is a weaker statement than "the directory says
@@ -285,7 +285,7 @@ somebody sets it. It is narrower than it sounds:
 | `identity_events` | What has been failing across the providers — refusals, denials, deactivations, group syncs |
 
 "They can't log in" is the most common ticket a service desk takes. An account
-that was never provisioned, one the customer's directory deactivated last night,
+that was never provisioned, one the organisation's directory deactivated last night,
 and one being refused by a mapping rule all look identical from outside, and none
 is a forgotten password.
 
@@ -300,7 +300,7 @@ event log carries denial reasons and IP addresses.
 
 **Read only, and this is the plugin where that matters most.** The code beside
 these tools creates accounts, disables them and maps them into profiles. A model
-that could provision could grant access to a customer's GLPI, and one that could
+that could provision could grant access to your GLPI, and one that could
 deprovision could lock a real person out.
 
 ## Install
@@ -341,7 +341,7 @@ Two suites, no real credentials and no network egress.
 setup.php            hooks, the firewall exemption and the stateless-path
                      declaration that SCIM needs
 hook.php             install/uninstall: six tables, one right, three cron tasks
-src/Source.php       one customer's identity configuration
+src/Source.php       one organisation's identity configuration
 src/Link.php         the fact that a GLPI user came from a source
 src/Mapping.php      one rule, and the form for it
 src/Mapper.php       applying rules, and the dynamic/manual split

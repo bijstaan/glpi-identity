@@ -12,11 +12,11 @@ use User;
 /**
  * Sign-in and provisioning, offered to glpi-ai's assistant as tools.
  *
- * "They can't log in" is the single most common ticket an MSP service desk
+ * "They can't log in" is the single most common ticket a service desk
  * takes, and it is the one where a model was previously reduced to advice.
  * Every fact that answers it is in this plugin: which identity provider the
  * person belongs to, whether they were ever provisioned, whether the last
- * attempt was refused and why, and whether the whole customer's SSO stopped
+ * attempt was refused and why, and whether a whole organisation's SSO stopped
  * working at 09:04.
  *
  * Three tools, and they are the three shapes the question comes in:
@@ -24,20 +24,20 @@ use User;
  *  - **`identity_status`** for one person — are they linked, are they active,
  *    what happened the last few times they tried.
  *  - **`identity_events`** for the estate — what has been failing, which is
- *    the difference between one person's password and a customer's whole
+ *    the difference between one person's password and an organisation's whole
  *    tenant being down.
  *  - **`identity_sources`** for the configuration behind both: which
- *    customers have an identity provider at all, whether its discovery still
+ *    organisations have an identity provider at all, whether its discovery still
  *    resolves, when its directory last pushed anything, and how many people
  *    are attached to it. It is the tool that separates "this person's account
- *    is wrong" from "this customer's connector stopped three weeks ago and
+ *    is wrong" from "this organisation's connector stopped three weeks ago and
  *    nobody noticed" — and the second is invisible from a single user's
  *    record, which is where everybody looks first.
  *
  * **Read only, and this is the plugin where that matters most.** These tools
  * sit next to code that creates accounts, disables them and maps them into
  * profiles. A model that could provision would be a model that could grant
- * itself — or anybody — access to a customer's GLPI, and no wording in a
+ * itself — or anybody — access to your GLPI, and no wording in a
  * description makes that safe. Deprovisioning is worse: it locks a real person
  * out of the system they raise tickets in.
  *
@@ -67,11 +67,11 @@ final class AiTools
         return new Tool(
             name: 'identity_sources',
             description: 'The identity providers configured here and the health of each: which '
-                . 'customer they belong to, whether sign-in and SCIM provisioning are switched '
+                . 'entity they belong to, whether sign-in and SCIM provisioning are switched '
                 . 'on, when discovery last succeeded or what error it is stuck on, when the '
                 . 'directory last pushed a change, how many accounts are attached, and how many '
                 . 'are waiting for their owner to sign in for the first time. Use it when more '
-                . 'than one person at the same customer cannot log in, when nobody there has '
+                . 'than one person at the same entity cannot log in, when nobody there has '
                 . 'been provisioned lately, and before telling somebody to reset a password — a '
                 . 'connector that stopped three weeks ago is not a password problem.',
             schema: [
@@ -83,7 +83,7 @@ final class AiTools
                     ],
                     'entities_id' => [
                         'type'        => 'integer',
-                        'description' => 'Only providers belonging to this customer entity.',
+                        'description' => 'Only providers belonging to this entity.',
                     ],
                 ],
             ],
@@ -213,7 +213,7 @@ final class AiTools
                 . 'belong to, whether their account is linked and active, when they last signed '
                 . 'in, and what happened on their recent attempts including the reason for any '
                 . 'refusal. Reach for this before suggesting a password reset — an account that '
-                . 'was never provisioned, was deactivated by the customer\'s own directory, or '
+                . 'was never provisioned, was deactivated by the organisation\'s own directory, or '
                 . 'is being refused by a mapping rule looks identical to a forgotten password '
                 . 'from the outside.',
             schema: [
@@ -349,9 +349,9 @@ final class AiTools
             name: 'identity_events',
             description: 'Recent sign-in and provisioning activity across the identity '
                 . 'providers: successful logins, refusals with their reason, accounts created or '
-                . 'deactivated by a customer\'s directory, and group syncs. Use it when more than '
+                . 'deactivated by an organisation\'s directory, and group syncs. Use it when more than '
                 . 'one person cannot get in — a run of refusals at the same minute is a tenant '
-                . 'problem and not eleven forgotten passwords — and after a customer changes '
+                . 'problem and not eleven forgotten passwords — and after an organisation changes '
                 . 'something at their end.',
             schema: [
                 'type'       => 'object',

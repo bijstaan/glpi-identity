@@ -118,7 +118,7 @@ if (!empty($_POST['add'])) {
     $link      = new Link();
 
     // Scoped to the source the right was checked against. A link id belonging
-    // to another customer's source must not be reachable through this one, and
+    // to another organisation's source must not be reachable through this one, and
     // an id in a form field is not evidence of anything.
     if (
         !$link->getFromDB((int) ($_POST['reopen'] ?? $_POST['unlink']))

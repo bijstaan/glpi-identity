@@ -4,7 +4,7 @@
 //
 // The PHP suites cover the protocol — SCIM over real HTTP, OIDC against a
 // provider that signs properly. What is left is the part only a browser
-// reaches: whether an administrator can actually configure a customer, whether
+// reaches: whether an administrator can actually configure an organisation, whether
 // the SCIM token is shown once and then never again, and whether the sign-in
 // block appears on GLPI's own login page for a source that is ready and stays
 // away for one that is not.
@@ -205,11 +205,11 @@ const save = async (page, button = 'update') => {
   // states this section already puts the page into.
   await fullPage(guest, `${SHOTS}/identity-05-login.png`);
   // The default is the email box and nothing else. The house provider is
-  // reachable through it — an address matching no customer domain falls back
+  // reachable through it — an address matching no claimed domain falls back
   // there — so a button would be a second route to the same place.
   check('no provider button by default',
     (await guest.locator('.glpiidentity-house').count()) === 0);
-  check('customers are not listed by name',
+  check('organisations are not listed by name',
     !/Contoso/.test(await guest.evaluate(() => document.body.innerText)));
   check('nor is the house provider',
     !/Bijstaan/.test(await guest.evaluate(() => document.body.innerText)));

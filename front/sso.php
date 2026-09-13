@@ -69,7 +69,7 @@ if ($action === 'start') {
     if ($source === null || !$source->ssoReady()) {
         // The same answer whether the domain is unknown or the source is
         // misconfigured: an address that gets a different response is an
-        // address an outsider can use to map the customer list.
+        // address an outsider can use to map the list of organisations.
         EventLog::record(EventLog::SSO_DENIED, null, [
             'error'   => true,
             'subject' => (string) ($_GET['email'] ?? ''),

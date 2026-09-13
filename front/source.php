@@ -5,7 +5,7 @@
  */
 
 /**
- * The identity sources — one per customer directory.
+ * The identity sources — one per organisation's directory.
  */
 
 require_once(__DIR__ . '/../../../front/_check_webserver_config.php');

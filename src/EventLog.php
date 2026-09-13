@@ -61,7 +61,7 @@ class EventLog extends CommonDBTM
      * Record something that happened.
      *
      * Swallows its own failures. A log table that is missing or full must not
-     * be the reason a customer's staff cannot sign in.
+     * be the reason an organisation's staff cannot sign in.
      */
     public static function record(
         string $event,
