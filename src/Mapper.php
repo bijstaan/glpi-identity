@@ -60,12 +60,18 @@ final class Mapper
 
                 case Mapping::ACTION_PROFILE:
                     $profiles_id = (int) $rule->fields['profiles_id'];
+                    // Keyed by entity as well as profile: the same profile in
+                    // two different entities is two different grants, which is
+                    // the whole point of a rule being able to name one. A rule
+                    // written before the column existed carries its source's
+                    // entity, backfilled by the install hook.
+                    $entities_id = $rule->targetEntity();
                     // OR, not overwrite: if any matching rule grants the profile
                     // recursively, it is recursive. The alternative — last rule
                     // wins — makes the outcome depend on rule order in a way
                     // nobody would predict from reading the list.
-                    $plan['profiles'][$profiles_id] =
-                        ($plan['profiles'][$profiles_id] ?? false)
+                    $plan['profiles'][$entities_id][$profiles_id] =
+                        ($plan['profiles'][$entities_id][$profiles_id] ?? false)
                         || (int) $rule->fields['is_dynamic_recursive'] === 1;
                     break;
 
@@ -80,7 +86,8 @@ final class Mapper
         // than as a missing mapping.
         $fallback = (int) $source->fields['default_profiles_id'];
         if ($plan['profiles'] === [] && $fallback > 0) {
-            $plan['profiles'][$fallback] = (bool) $source->fields['is_recursive'];
+            $plan['profiles'][(int) $source->fields['entities_id']][$fallback] =
+                (bool) $source->fields['is_recursive'];
         }
 
         $plan['groups'] = array_values(array_unique(array_filter($plan['groups'])));
@@ -116,65 +123,95 @@ final class Mapper
     /**
      * Bring the user's dynamic profile grants in line with the plan.
      *
-     * Scoped to the source's entity. A rule belonging to Acme can only ever
-     * grant a profile *in Acme's entity* — the entity is not something a rule
-     * can choose, because a rule that could choose it would be a way for one
-     * organisation's directory to place a user in another's tree.
+     * Scoped to the source's **subtree** — its own entity and everything below
+     * it. A rule may name which entity in there a profile lands in, which is
+     * what lets one directory describe somebody who is a technician in one part
+     * of the tree and an ordinary requester in another. It still cannot reach
+     * outside that subtree: Mapping::scopeFor() bounds the choice on save, and
+     * the loop below re-checks it rather than trusting the stored row, since a
+     * source can be moved to a different entity after its rules were written.
      *
-     * @param array<int,bool> $wanted profiles_id => recursive
+     * Reconciling across the whole subtree rather than a single entity rests on
+     * one property: these rows all belong to *this* source, because a GLPI user
+     * belongs to one source. Provisioning::createNew() refuses a username that
+     * already exists anywhere, and an invitation is only ever claimed at
+     * sign-in, which routes by email domain to exactly one source. If that ever
+     * stops holding, the withdraw loop below would need to know which source
+     * granted a row rather than inferring it.
+     *
+     * Only `is_dynamic` rows are touched either way, so anything an
+     * administrator granted by hand survives all of this untouched.
+     *
+     * @param array<int,array<int,bool>> $wanted entities_id => [profiles_id => recursive]
      * @return string[]
      */
     private static function syncProfiles(Source $source, User $user, array $wanted): array
     {
-        $entities_id = (int) $source->fields['entities_id'];
-        $changes     = [];
+        $scope   = Mapping::scopeFor($source->getID());
+        $changes = [];
+
+        if ($scope === []) {
+            return $changes;
+        }
 
         $existing = [];
         foreach (
             getAllDataFromTable(Profile_User::getTable(), [
                 'users_id'    => $user->getID(),
-                'entities_id' => $entities_id,
+                'entities_id' => $scope,
                 'is_dynamic'  => 1,
             ]) as $row
         ) {
-            $existing[(int) $row['profiles_id']] = $row;
+            $existing[(int) $row['entities_id']][(int) $row['profiles_id']] = $row;
         }
 
-        foreach ($wanted as $profiles_id => $recursive) {
-            if (isset($existing[$profiles_id])) {
-                if ((bool) $existing[$profiles_id]['is_recursive'] !== $recursive) {
-                    (new Profile_User())->update([
-                        'id'           => $existing[$profiles_id]['id'],
-                        'is_recursive' => $recursive ? 1 : 0,
-                    ]);
-                    $changes[] = sprintf('profile %d recursion changed', $profiles_id);
-                }
-                unset($existing[$profiles_id]);
+        $name = static fn(int $p, int $e): string => sprintf(
+            '"%s" in "%s"',
+            Dropdown::getDropdownName('glpi_profiles', $p),
+            Dropdown::getDropdownName('glpi_entities', $e)
+        );
+
+        foreach ($wanted as $entities_id => $profiles) {
+            if (!in_array($entities_id, $scope, true)) {
+                // The source moved after the rule was written, and the rule now
+                // points outside what it owns. Dropped rather than applied.
                 continue;
             }
 
-            (new Profile_User())->add([
-                'users_id'     => $user->getID(),
-                'profiles_id'  => $profiles_id,
-                'entities_id'  => $entities_id,
-                'is_recursive' => $recursive ? 1 : 0,
-                // The marker that makes this reversible. Without it the plugin
-                // could never withdraw a profile it granted.
-                'is_dynamic'   => 1,
-            ]);
-            $changes[] = sprintf(
-                'granted profile "%s"',
-                Dropdown::getDropdownName('glpi_profiles', $profiles_id)
-            );
+            foreach ($profiles as $profiles_id => $recursive) {
+                if (isset($existing[$entities_id][$profiles_id])) {
+                    $row = $existing[$entities_id][$profiles_id];
+                    if ((bool) $row['is_recursive'] !== $recursive) {
+                        (new Profile_User())->update([
+                            'id'           => $row['id'],
+                            'is_recursive' => $recursive ? 1 : 0,
+                        ]);
+                        $changes[] = 'recursion changed on ' . $name($profiles_id, $entities_id);
+                    }
+                    unset($existing[$entities_id][$profiles_id]);
+                    continue;
+                }
+
+                (new Profile_User())->add([
+                    'users_id'     => $user->getID(),
+                    'profiles_id'  => $profiles_id,
+                    'entities_id'  => $entities_id,
+                    'is_recursive' => $recursive ? 1 : 0,
+                    // The marker that makes this reversible. Without it the plugin
+                    // could never withdraw a profile it granted.
+                    'is_dynamic'   => 1,
+                ]);
+                $changes[] = 'granted ' . $name($profiles_id, $entities_id);
+            }
         }
 
-        // Whatever is left was granted by a rule that no longer matches.
-        foreach ($existing as $profiles_id => $row) {
-            (new Profile_User())->delete(['id' => $row['id']], true);
-            $changes[] = sprintf(
-                'withdrew profile "%s"',
-                Dropdown::getDropdownName('glpi_profiles', $profiles_id)
-            );
+        // Whatever is left was granted by a rule that no longer matches, or that
+        // now names a different entity.
+        foreach ($existing as $entities_id => $profiles) {
+            foreach ($profiles as $profiles_id => $row) {
+                (new Profile_User())->delete(['id' => $row['id']], true);
+                $changes[] = 'withdrew ' . $name($profiles_id, $entities_id);
+            }
         }
 
         return $changes;

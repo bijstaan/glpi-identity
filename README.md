@@ -20,8 +20,8 @@ No new dependencies: GLPI already ships `league/oauth2-client`,
   writing only into that source's entity.
 - **Mapping** — rules turning what a directory says into what GLPI does:
   *groups contains Executive → add to the VIP group*, *groups is IT Staff → grant
-  the Technician profile*, *department is Field Services → set their location to
-  the depot*.
+  the Technician profile in Internal > IT*, *department is Field Services → set
+  their location to the depot*.
 - **An audit trail** of who signed in, what was provisioned and what was refused.
 - **`identity_status` and `identity_events`** read-only tools for `glpiai`.
 
@@ -234,6 +234,21 @@ Rules belong to a source, not the instance. GLPI has a good global
 authorisation-rules engine, and a single global list is the wrong shape here:
 forty entities' rules in one ordered list, where the isolation between them
 depends on every rule remembering to test which directory it came from.
+
+A profile rule also says **which entity** to grant the profile in — the source's
+own entity, or any entity beneath it. That is what lets one directory describe
+somebody who is a technician in one part of the tree and an ordinary requester in
+another: *groups is Support → Support Technician in Customers, and below* beside
+*everyone → Self-Service in Internal > IT*. Without it a source could only ever
+grant in one entity, and a person whose role differs across two of them could not
+be expressed at all.
+
+The choice is bounded by the source's subtree, on save and again when the rule is
+applied. Acme's rules still cannot reach Beta's tree, so the property that makes
+this safe to hand to an outside directory is unchanged; only the granularity is.
+Rules written before this existed keep their old meaning — the upgrade fills the
+column in with each rule's source entity, which is exactly what the engine did
+for them before.
 
 Group membership reaches a mapping by two routes and needs only one:
 

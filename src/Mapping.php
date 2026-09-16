@@ -103,6 +103,35 @@ class Mapping extends CommonDBChild
     }
 
     /**
+     * The entities a source's rules may grant a profile in: its own, and
+     * everything beneath it.
+     *
+     * This is the boundary that keeps a rule's choice of entity safe. A rule can
+     * place someone anywhere inside the subtree its source already owns — which
+     * is the subtree that source's directory is already trusted with — and
+     * nowhere else. Acme's rules still cannot reach Beta's tree, so the property
+     * that made the entity un-choosable in the first place is intact; it is only
+     * the granularity that changed.
+     *
+     * @return int[] entity ids, the source's own first
+     */
+    public static function scopeFor(int $sources_id): array
+    {
+        $source = new Source();
+        if (!$source->getFromDB($sources_id)) {
+            return [];
+        }
+
+        return array_values(getSonsOf('glpi_entities', (int) $source->fields['entities_id']));
+    }
+
+    /** The entity this rule grants its profile in. */
+    public function targetEntity(): int
+    {
+        return (int) ($this->fields['target_entities_id'] ?? 0);
+    }
+
+    /**
      * Does this rule fire, given what the directory said?
      *
      * `$values` is every value of the rule's claim — a groups claim is a list,
@@ -154,7 +183,18 @@ class Mapping extends CommonDBChild
 
         $target = match ((string) $this->fields['action']) {
             self::ACTION_GROUP   => Dropdown::getDropdownName('glpi_groups', (int) $this->fields['groups_id']),
-            self::ACTION_PROFILE => Dropdown::getDropdownName('glpi_profiles', (int) $this->fields['profiles_id']),
+            // The entity belongs in the description: "grant Technician" means
+            // something very different in the root entity than in one leaf of
+            // it, and this string is what the event log records as the reason
+            // somebody's access changed.
+            self::ACTION_PROFILE => sprintf(
+                '%s %s %s',
+                Dropdown::getDropdownName('glpi_profiles', (int) $this->fields['profiles_id']),
+                __('in', 'glpiidentity'),
+                Dropdown::getDropdownName('glpi_entities', $this->targetEntity())
+                    . ((int) $this->fields['is_dynamic_recursive'] === 1
+                        ? ' ' . __('and below', 'glpiidentity') : '')
+            ),
             default              => $this->fields['field_name'] . ' = ' . $this->fields['field_value'],
         };
 
@@ -240,6 +280,30 @@ class Mapping extends CommonDBChild
             if ($target <= 0) {
                 return $refuse(__('Choose the GLPI profile this rule should grant.', 'glpiidentity'));
             }
+
+            $sources_id = (int) ($input['plugin_glpiidentity_sources_id']
+                ?? $this->fields['plugin_glpiidentity_sources_id'] ?? 0);
+            $scope = self::scopeFor($sources_id);
+            if ($scope === []) {
+                return $refuse(__('This rule has no identity source.', 'glpiidentity'));
+            }
+
+            // Absent on an older form post, or on a rule written before the
+            // column existed: the source's own entity is what that has always
+            // meant, and is the narrowest thing it could mean.
+            $entity = array_key_exists('target_entities_id', $input)
+                ? (int) $input['target_entities_id']
+                : (int) ($this->fields['target_entities_id'] ?? $scope[0]);
+
+            // The check that makes a choosable entity safe. Without it a rule
+            // could grant a profile in another organisation's tree, which is a
+            // directory being handed the ability to place its people anywhere.
+            if (!in_array($entity, $scope, true)) {
+                return $refuse(__('A rule can only grant a profile in its source\'s entity '
+                    . 'or one beneath it.', 'glpiidentity'));
+            }
+
+            $input['target_entities_id'] = $entity;
         }
 
         if ($action === self::ACTION_FIELD) {
@@ -332,8 +396,10 @@ class Mapping extends CommonDBChild
                 $target = match ((string) $rule->fields['action']) {
                     self::ACTION_GROUP   => $e(Dropdown::getDropdownName('glpi_groups', (int) $rule->fields['groups_id'])),
                     self::ACTION_PROFILE => $e(Dropdown::getDropdownName('glpi_profiles', (int) $rule->fields['profiles_id']))
+                        . ' <span class="text-muted">' . __s('in', 'glpiidentity') . '</span> '
+                        . $e(Dropdown::getDropdownName('glpi_entities', $rule->targetEntity()))
                         . ((int) $rule->fields['is_dynamic_recursive'] === 1
-                            ? ' <span class="badge bg-azure-lt">' . __s('recursive') . '</span>' : ''),
+                            ? ' <span class="badge bg-azure-lt">' . __s('and below', 'glpiidentity') . '</span>' : ''),
                     default              => $e($rule->fields['field_name']) . ' = ' . $e($rule->fields['field_value']),
                 };
 
@@ -432,14 +498,34 @@ class Mapping extends CommonDBChild
            . '</div></td>';
         echo '<td>' . Profile::getTypeName(1) . '</td><td>';
         Profile::dropdown(['name' => 'profiles_id', 'value' => $this->fields['profiles_id']]);
+        echo "<div class='form-text'>" . __s('Used when the action is "Grant GLPI profile".', 'glpiidentity')
+           . '</div></td></tr>';
+
+        // The entity the profile is granted in, limited to the source's own
+        // subtree. Listing only those entities is the point: an administrator
+        // cannot pick one belonging to another organisation, so the rule form
+        // cannot express something the validator would then have to refuse.
+        $scope   = self::scopeFor((int) $this->fields['plugin_glpiidentity_sources_id']);
+        $default = $this->targetEntity() ?: (int) ($source->fields['entities_id'] ?? 0);
+
+        echo "<tr class='tab_bg_1'><td>" . __s('Grant it in', 'glpiidentity') . '</td><td>';
+        \Entity::dropdown([
+            'name'      => 'target_entities_id',
+            'value'     => $default,
+            'condition' => ['id' => $scope],
+            'display_emptychoice' => false,
+        ]);
         echo "<div class='form-text'>"
-           . __s('Granted in the source\'s entity.', 'glpiidentity') . ' ';
+           . __s('The source\'s own entity, or one beneath it. A rule cannot reach outside the '
+               . 'part of the tree its source owns.', 'glpiidentity')
+           . '</div></td>';
+        echo '<td>' . __s('Sub-entities', 'glpiidentity') . '</td><td>';
         echo Html::getCheckbox([
             'name'    => 'is_dynamic_recursive',
             'checked' => (int) $this->fields['is_dynamic_recursive'] === 1,
             'value'   => 1,
-        ]) . ' ' . __s('and its sub-entities', 'glpiidentity');
-        echo '</div></td></tr>';
+        ]) . ' ' . __s('the grant also applies below that entity', 'glpiidentity');
+        echo '</td></tr>';
 
         echo "<tr class='tab_bg_1'><td>" . __s('User field', 'glpiidentity') . '</td><td>';
         $choices = ['' => Dropdown::EMPTY_VALUE];
@@ -474,5 +560,9 @@ class Mapping extends CommonDBChild
         $this->fields['action']               = self::ACTION_GROUP;
         $this->fields['rank_order']           = 0;
         $this->fields['is_dynamic_recursive'] = 0;
+        // Left at 0 rather than guessed: the form fills it from the source, and
+        // validate() falls back to the source's own entity for anything that
+        // reaches the database without passing through the form.
+        $this->fields['target_entities_id']   = 0;
     }
 }

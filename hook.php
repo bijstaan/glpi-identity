@@ -110,6 +110,13 @@ function plugin_glpiidentity_install()
                 `action` VARCHAR(20) NOT NULL DEFAULT 'group',
                 `groups_id` INT UNSIGNED NOT NULL DEFAULT 0,
                 `profiles_id` INT UNSIGNED NOT NULL DEFAULT 0,
+                -- Which entity the granted profile lands in. Constrained on save
+                -- to the source's own entity or one beneath it, so a rule can
+                -- place someone anywhere inside the subtree its source already
+                -- owns and nowhere else. Deliberately not called `entities_id`:
+                -- CommonDBTM::isEntityAssign() keys off that exact name, and a
+                -- mapping is a child of its source, not an entity-scoped item.
+                `target_entities_id` INT UNSIGNED NOT NULL DEFAULT 0,
                 `is_dynamic_recursive` TINYINT NOT NULL DEFAULT 0,
                 `field_name` VARCHAR(100) NOT NULL DEFAULT '',
                 `field_value` VARCHAR(255) NOT NULL DEFAULT '',
@@ -210,6 +217,23 @@ function plugin_glpiidentity_install()
         );
     }
 
+    if (!$DB->fieldExists(Mapping::getTable(), 'target_entities_id')) {
+        $DB->doQuery(
+            "ALTER TABLE `" . Mapping::getTable() . "`
+                ADD `target_entities_id` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `profiles_id`"
+        );
+        // Every rule written before this column existed meant "the source's own
+        // entity", because that was the only thing the engine could do. Backfill
+        // it explicitly rather than leaving 0 to mean "inherit": entity 0 is the
+        // root entity, a real and very powerful place, so a sentinel that looked
+        // like one would be the worst possible default to get wrong.
+        $DB->doQuery(
+            "UPDATE `" . Mapping::getTable() . "` m
+                JOIN `" . Source::getTable() . "` s ON s.`id` = m.`plugin_glpiidentity_sources_id`
+                SET m.`target_entities_id` = s.`entities_id`"
+        );
+    }
+
     CronTask::register(
         Source::class,
         'discovery',
@@ -254,7 +278,17 @@ function plugin_glpiidentity_install()
 
     plugin_glpiidentity_install_rights();
 
-    Config::setConfigurationValues(PLUGIN_GLPIIDENTITY_CONFIG_CONTEXT, Settings::DEFAULTS);
+    // Only the keys that are missing. GLPI re-runs the install hook on every
+    // version change, and setConfigurationValues() overwrites — so seeding the
+    // whole of DEFAULTS here would silently reset an administrator's settings
+    // on each upgrade of the plugin.
+    Config::setConfigurationValues(
+        PLUGIN_GLPIIDENTITY_CONFIG_CONTEXT,
+        array_diff_key(
+            Settings::DEFAULTS,
+            Config::getConfigurationValues(PLUGIN_GLPIIDENTITY_CONFIG_CONTEXT)
+        )
+    );
 
     return true;
 }

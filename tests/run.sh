@@ -4,8 +4,9 @@
 # Run inside the GLPI container, from the plugin directory:
 #   docker compose -p glpi exec glpi sh -c 'cd /var/www/glpi/plugins/glpiidentity && tests/run.sh'
 #
-# scim.php needs nothing but the plugin to be active — it drives the real HTTP
-# endpoint. oidc.php additionally needs the mock provider, which this starts.
+# mapping.php needs nothing at all. scim.php needs the plugin active — it drives
+# the real HTTP endpoint. oidc.php additionally needs the mock provider, which
+# this starts.
 # Each suite restores the configuration and purges the fixtures it creates.
 set -e
 
@@ -21,6 +22,9 @@ trap 'kill $idp 2>/dev/null' EXIT
 sleep 1
 
 status=0
+# Needs neither the mock provider nor the web server - it drives the mapping
+# engine directly - so it runs first and fails fast.
+php tests/mapping.php || status=1
 php tests/scim.php || status=1
 php tests/oidc.php || status=1
 
