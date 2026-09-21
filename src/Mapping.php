@@ -311,6 +311,21 @@ class Mapping extends CommonDBChild
             if (!array_key_exists($field, self::assignableFields())) {
                 return $refuse(__('That user field cannot be set by a mapping.', 'glpiidentity'));
             }
+
+            // The other half of the overlap refusal — see AttributeMap. A field
+            // filled by pass-through already has a source of truth, and a rule
+            // writing a constant into it would mean the value an administrator
+            // sees depends on which ran last.
+            $sources_id = (int) ($input['plugin_glpiidentity_sources_id']
+                ?? $this->fields['plugin_glpiidentity_sources_id'] ?? 0);
+
+            if (isset(AttributeMap::fieldsSetByMaps($sources_id)[$field])) {
+                return $refuse(sprintf(
+                    __('This source already fills "%s" from a directory attribute. Remove that '
+                        . 'attribute map first, or choose another field.', 'glpiidentity'),
+                    self::assignableFields()[$field]['label']
+                ));
+            }
         }
 
         if (isset($input['match_operator']) && $input['match_operator'] === self::OP_REGEX) {

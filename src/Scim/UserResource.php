@@ -105,6 +105,141 @@ final class UserResource
     }
 
     /**
+     * The whole payload, flattened to the paths an administrator would write.
+     *
+     * `fromScim()` deliberately keeps five things, because those are what
+     * provisioning *needs*. This is the other half: everything the connector
+     * sent, keyed the way the connector's own mapping screen names it, so an
+     * {@see \GlpiPlugin\Glpiidentity\AttributeMap} row can name one and a
+     * {@see \GlpiPlugin\Glpiidentity\Mapping} rule can match on one.
+     *
+     * The shape is `array<string,string[]>` — the same bag the mapper already
+     * gets from an id token, so both routes converge before anything reads
+     * them, and neither the rules engine nor the pass-through has to know which
+     * one it is serving.
+     *
+     * Multi-valued attributes get three addressable forms, because a connector
+     * decides which it sends and an administrator should not have to guess:
+     *
+     *   phoneNumbers.value                      every number, in order
+     *   phoneNumbers[type eq "work"].value      the one typed work
+     *   phoneNumbers[primary eq true].value     the one flagged primary
+     *
+     * An extension is addressed by its full urn, `urn:…:2.0:User:department`,
+     * with sub-attributes below it in dot form — which is what SCIM says and,
+     * more usefully, what Entra's attribute-mapping screen shows.
+     *
+     * @param array<string,mixed> $payload
+     * @return array<string,string[]>
+     */
+    public static function attributes(array $payload): array
+    {
+        // `groups` on a SCIM User is read-only by RFC 7643 and names membership
+        // the connector is echoing back, not asserting. Group truth here comes
+        // from /Groups, recorded as IdpGroups; letting an echoed attribute land
+        // under the same key would silently outrank it in claimsFor().
+        unset($payload['groups']);
+
+        $out = [];
+        self::flatten($payload, '', $out, false, 0);
+
+        return $out;
+    }
+
+    /**
+     * @param array<string,string[]> $out
+     */
+    private static function flatten(mixed $node, string $prefix, array &$out, bool $under_urn, int $depth): void
+    {
+        // SCIM payloads are shallow; anything this deep is a malformed or
+        // hostile body rather than an attribute somebody wants to map.
+        if ($depth > 8) {
+            return;
+        }
+
+        if ($node === null || is_scalar($node)) {
+            if ($prefix === '') {
+                return;
+            }
+
+            $out[$prefix][] = is_bool($node) ? ($node ? 'true' : 'false') : (string) $node;
+
+            return;
+        }
+
+        if (!is_array($node)) {
+            return;
+        }
+
+        if (array_is_list($node)) {
+            foreach ($node as $entry) {
+                if (!is_array($entry)) {
+                    // A plain multi-valued attribute: every value under the one
+                    // key, which is how a groups or a roles claim already
+                    // arrives from a token.
+                    self::flatten($entry, $prefix, $out, false, $depth + 1);
+                    continue;
+                }
+
+                $type    = is_scalar($entry['type'] ?? null) ? (string) $entry['type'] : '';
+                $primary = self::toBool($entry['primary'] ?? false);
+
+                foreach ($entry as $key => $value) {
+                    $key = (string) $key;
+
+                    self::flatten($value, self::join($prefix, $key, $under_urn), $out, false, $depth + 1);
+
+                    if ($type !== '') {
+                        self::flatten(
+                            $value,
+                            $prefix . '[type eq "' . $type . '"].' . $key,
+                            $out,
+                            false,
+                            $depth + 1
+                        );
+                    }
+
+                    if ($primary) {
+                        self::flatten(
+                            $value,
+                            $prefix . '[primary eq true].' . $key,
+                            $out,
+                            false,
+                            $depth + 1
+                        );
+                    }
+                }
+            }
+
+            return;
+        }
+
+        foreach ($node as $key => $value) {
+            $key = (string) $key;
+
+            self::flatten(
+                $value,
+                self::join($prefix, $key, $under_urn),
+                $out,
+                // A urn names a schema extension, and its *immediate* children
+                // are joined to it with a colon. Anything below those is an
+                // ordinary sub-attribute again: `…:User:manager.displayName`.
+                $prefix === '' && str_starts_with($key, 'urn:'),
+                $depth + 1
+            );
+        }
+    }
+
+    private static function join(string $prefix, string $key, bool $under_urn): string
+    {
+        if ($prefix === '') {
+            return $key;
+        }
+
+        return $prefix . ($under_urn ? ':' : '.') . $key;
+    }
+
+    /**
      * The address to treat as theirs.
      *
      * Prefer the one flagged primary, then the first work address, then simply

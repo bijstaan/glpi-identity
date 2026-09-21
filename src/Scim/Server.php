@@ -227,7 +227,7 @@ final class Server
             return Response::badRequest((string) $result['error']);
         }
 
-        $this->applyMappings($source, $result['link']);
+        $this->applyMappings($source, $result['link'], UserResource::attributes($request->body));
 
         $user = $result['link']->user();
         $body = UserResource::toScim($source, $result['link'], $user);
@@ -266,7 +266,7 @@ final class Server
             return Response::badRequest((string) $result['error']);
         }
 
-        $this->applyMappings($source, $result['link']);
+        $this->applyMappings($source, $result['link'], UserResource::attributes($request->body));
 
         return Response::ok(UserResource::toScim($source, $result['link'], $result['link']->user()));
     }
@@ -294,17 +294,26 @@ final class Server
 
         $person  = [];
         $refused = null;
+        // What the patch said about this person, keyed the way an attribute map
+        // names it. Built beside $person rather than from it: $person is the
+        // five things provisioning needs, and everything else in the patch is
+        // exactly what the pass-through exists to carry.
+        $bag = [];
 
         foreach ($operations as $operation) {
             if (!is_array($operation)) {
                 continue;
             }
 
-            $op    = strtolower((string) ($operation['op'] ?? ''));
-            $path  = strtolower(trim((string) ($operation['path'] ?? '')));
+            $op = strtolower((string) ($operation['op'] ?? ''));
+            // Not lowercased: patchAttribute() folds case itself, and an
+            // attribute map is written in the connector's own spelling —
+            // `phoneNumbers[type eq "work"].value`, not `phonenumbers…`.
+            $path  = trim((string) ($operation['path'] ?? ''));
+            $lower = strtolower($path);
             $value = $operation['value'] ?? null;
 
-            if ($op === 'remove' && $path === 'active') {
+            if ($op === 'remove' && $lower === 'active') {
                 $person['active'] = false;
                 continue;
             }
@@ -320,6 +329,8 @@ final class Server
                 ? $value
                 : [$path => $value];
 
+            $bag = array_merge($bag, UserResource::attributes($attributes));
+
             foreach ($attributes as $attribute => $attribute_value) {
                 $known = self::patchAttribute((string) $attribute, $attribute_value, $person);
                 if (!$known) {
@@ -328,7 +339,10 @@ final class Server
             }
         }
 
-        if ($person === []) {
+        // A patch that touches none of the five core attributes is no longer
+        // necessarily a patch we cannot act on: it may be a phone number an
+        // attribute map picks up. Refuse only when nothing at all came of it.
+        if ($person === [] && $bag === []) {
             return $refused !== null
                 ? Response::badRequest($refused, 'invalidPath')
                 : Response::ok(UserResource::toScim($source, $link, $link->user()));
@@ -355,7 +369,7 @@ final class Server
             return Response::badRequest((string) $result['error']);
         }
 
-        $this->applyMappings($source, $result['link']);
+        $this->applyMappings($source, $result['link'], $bag);
 
         return Response::ok(UserResource::toScim($source, $result['link'], $result['link']->user()));
     }
@@ -694,14 +708,29 @@ final class Server
 
     // ------------------------------------------------------------------ shared
 
-    private function applyMappings(Source $source, Link $link): void
+    /**
+     * Recompute what the directory says this person should get.
+     *
+     * `$attributes` is the request's own payload, flattened. It is empty for a
+     * group change — the membership moved, the person's attributes did not —
+     * and claimsFor() then fills the groups claim from the IdpGroups on record,
+     * which is what makes group mapping work for a connector that sends no
+     * groups claim at sign-in.
+     *
+     * @param array<string,string[]> $attributes
+     */
+    private function applyMappings(Source $source, Link $link, array $attributes = []): void
     {
         $user = $link->user();
         if ($user === null) {
             return;
         }
 
-        Mapper::apply($source, $user, Provisioning::claimsFor($source, (int) $user->getID()));
+        Mapper::apply(
+            $source,
+            $user,
+            Provisioning::claimsFor($source, (int) $user->getID(), $attributes)
+        );
     }
 
     /**

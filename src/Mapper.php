@@ -38,6 +38,11 @@ final class Mapper
      * what a set of rules *would* do to a given set of groups — which is the
      * only way to be confident about a mapping before real people arrive.
      *
+     * The claims bag is whatever route produced it: claim names at sign-in,
+     * flattened SCIM attribute paths on a provisioning request. Rules match on
+     * it and attribute maps read values out of it, and neither needs to know
+     * which of the two it is looking at.
+     *
      * @param array<string,string[]> $claims claim name => every value it has
      * @return array{groups:int[],profiles:array<int,bool>,fields:array<string,string>,matched:string[]}
      */
@@ -80,6 +85,15 @@ final class Mapper
                     break;
             }
         }
+
+        // Pass-through: fields copied from what the directory said about *this*
+        // person, rather than set to a constant by a rule. A field cannot be
+        // written by both — an attribute map naming a field a static rule
+        // already sets is refused on save, and vice versa — so the union below
+        // cannot silently disagree with itself. `+` rather than array_merge is
+        // belt and braces: if a pair ever did coexist, the explicit rule is the
+        // more specific statement and wins.
+        $plan['fields'] += AttributeMap::valuesFrom($source, $claims);
 
         // The floor. Somebody who authenticates and then has no profile has a
         // GLPI that refuses every page, which reads as a broken login rather

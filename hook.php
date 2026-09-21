@@ -8,6 +8,7 @@ use GlpiPlugin\Glpiidentity\EventLog;
 use GlpiPlugin\Glpiidentity\IdpGroup;
 use GlpiPlugin\Glpiidentity\IdpGroup_User;
 use GlpiPlugin\Glpiidentity\Link;
+use GlpiPlugin\Glpiidentity\AttributeMap;
 use GlpiPlugin\Glpiidentity\Mapping;
 use GlpiPlugin\Glpiidentity\Settings;
 use GlpiPlugin\Glpiidentity\Source;
@@ -217,6 +218,31 @@ function plugin_glpiidentity_install()
         );
     }
 
+    if (!$DB->tableExists(AttributeMap::getTable())) {
+        // One row per source per GLPI field — the uniqueness is enforced on
+        // save rather than by the index, so the refusal can say which map or
+        // rule already owns the field instead of surfacing a duplicate-key
+        // error. The index is here to make that check cheap.
+        $DB->doQuery(
+            "CREATE TABLE `" . AttributeMap::getTable() . "` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `plugin_glpiidentity_sources_id` INT UNSIGNED NOT NULL,
+                `is_active` TINYINT NOT NULL DEFAULT 1,
+                `field_name` VARCHAR(100) NOT NULL DEFAULT '',
+                -- The attribute as a connector sends it, which is long: a
+                -- multi-valued path with an extension urn in front of it runs
+                -- well past what VARCHAR(190) would hold.
+                `scim_path` VARCHAR(400) NOT NULL DEFAULT '',
+                `claim` VARCHAR(190) NOT NULL DEFAULT '',
+                `comment` TEXT NULL,
+                `date_creation` TIMESTAMP NULL DEFAULT NULL,
+                `date_mod` TIMESTAMP NULL DEFAULT NULL,
+                PRIMARY KEY (`id`),
+                KEY `source` (`plugin_glpiidentity_sources_id`,`field_name`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=$charset COLLATE=$collate"
+        );
+    }
+
     if (!$DB->fieldExists(Mapping::getTable(), 'target_entities_id')) {
         $DB->doQuery(
             "ALTER TABLE `" . Mapping::getTable() . "`
@@ -362,6 +388,7 @@ function plugin_glpiidentity_uninstall()
             Link::getTable(),
             IdpGroup_User::getTable(),
             IdpGroup::getTable(),
+            AttributeMap::getTable(),
             Mapping::getTable(),
             Source::getTable(),
         ] as $table

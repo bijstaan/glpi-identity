@@ -62,7 +62,8 @@ Anything an administrator granted by hand is left alone.
 location, title, category, phone, administrative number, comments. The
 interesting fields on a GLPI user are `authtype`, `password`, `is_active` and
 `profiles_id`, and a mapping engine that could reach them would be a way for a
-directory to disable an administrator.
+directory to disable an administrator. Attribute maps share that one allowlist
+rather than keeping a second copy of it.
 
 **Deprovisioning never purges.** Deactivate or move to the bin, both recoverable.
 A GLPI user is referenced by every ticket they raised or solved.
@@ -260,6 +261,62 @@ is why SCIM groups are stored as the organisation's groups rather than mirrored 
 GLPI's group tree. Mirroring is available and off by default: one shared tree
 filling up with a dozen organisations' "All Staff" helps nobody.
 
+## Attribute maps
+
+A mapping rule answers *who is this person* — group membership, the same answer
+for everyone in the group — and sets a field to a constant. That is the right
+shape for a location and the wrong shape for a phone number, which is different
+for every person and would need one rule each.
+
+**Administration → Identity sources → a source → Attribute maps** is the other
+half. A row names a GLPI field and where its value comes from:
+
+| GLPI field | From SCIM | From an id token claim |
+|---|---|---|
+| Phone | `phoneNumbers[type eq "work"].value` | `phone_number` |
+| Administrative number | `urn:…:enterprise:2.0:User:employeeNumber` | `employee_id` |
+| Location | `addresses[type eq "work"].locality` | |
+
+Both sides may be filled in and usually are: the same field is fed by SCIM when
+a connector pushes an update and by the id token when the person signs in, and
+the two vocabularies name it differently. Whichever key the run carries is used.
+
+Multi-valued attributes get three addressable forms, because a connector decides
+which it sends and an administrator should not have to guess:
+
+```
+phoneNumbers.value                    every number, in order
+phoneNumbers[type eq "work"].value    the one typed work
+phoneNumbers[primary eq true].value   the one flagged primary
+```
+
+An extension is named by its full urn, with sub-attributes below it in dot
+form — `urn:…:2.0:User:manager.displayName` — which is what SCIM says and, more
+usefully, what Entra's own mapping screen shows. The same flattened bag is what
+rules match on, so a rule can now test `title` or `department` on a SCIM update
+and not only at sign-in.
+
+Three things worth knowing before you map a field:
+
+- **One field, one source of truth.** A field written by a static rule cannot
+  also be written by an attribute map, refused from both directions on save.
+  Two things writing one field with a documented winner is a configuration
+  nobody can read off the screen, so there is no precedence to learn.
+- **Absent is not empty.** A key missing from the payload leaves the field
+  alone; a key present and empty clears it. Entra omits null attributes rather
+  than sending them empty, so the other reading would wipe a field on every
+  cycle that happened not to carry it. The cost is that clearing an attribute
+  upstream does not clear it here until something says so explicitly.
+- **The directory wins, including over a person.** A mapped value overwrites
+  what is in GLPI on every sign-in and every SCIM update, an edit an
+  administrator made by hand included. Profiles and groups carry `is_dynamic`
+  so the plugin knows what it granted and leaves the rest alone; a field has no
+  such marker, so the only way to keep one editable in GLPI is not to map it.
+
+`phoneNumbers` is not something to add to the **user** attribute mapping in
+Entra — check it is in the default template, which usually sends
+`telephoneNumber → phoneNumbers[type eq "work"].value` already.
+
 ## SCIM
 
 Users and Groups: create, read, replace, patch, delete, one filter comparison,
@@ -334,8 +391,14 @@ php bin/console plugin:activate glpiidentity
 docker compose -p glpi exec glpi sh -c 'cd /var/www/glpi/plugins/glpiidentity && tests/run.sh'
 ```
 
-Two suites, no real credentials and no network egress.
+Four suites, no real credentials and no network egress.
 
+- **`tests/attributes.php`** covers the pass-through: flattening a payload the
+  way a connector names it, the overlap refusal from both directions, and the
+  absent-versus-empty rule. Needs neither the web server nor the mock provider.
+- **`tests/login.php`** covers what the login page offers and, more to the
+  point, that it never takes GLPI's own password form away without putting a
+  working route in its place.
 - **`tests/scim.php`** drives the real HTTP endpoint rather than calling the
   server class. Half of what makes a SCIM endpoint work is outside the handler —
   URL routing, the exemption that lets a request with no GLPI session through,
@@ -360,6 +423,7 @@ src/Source.php       one organisation's identity configuration
 src/Link.php         the fact that a GLPI user came from a source
 src/Mapping.php      one rule, and the form for it
 src/Mapper.php       applying rules, and the dynamic/manual split
+src/AttributeMap.php one GLPI field, filled from a directory attribute
 src/Provisioning.php creating, updating and retiring GLPI users
 src/SignIn.php       verified claims → a GLPI session
 src/IdpGroup.php     a group the directory told us about

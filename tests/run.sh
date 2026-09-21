@@ -26,6 +26,7 @@ status=0
 # engine and the login-page renderer directly - so they run first and fail fast.
 php tests/mapping.php || status=1
 php tests/login.php || status=1
+php tests/attributes.php || status=1
 php tests/scim.php || status=1
 php tests/oidc.php || status=1
 

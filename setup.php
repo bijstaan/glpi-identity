@@ -29,10 +29,11 @@ use Glpi\Http\SessionManager;
 use Glpi\Plugin\Hooks;
 use GlpiPlugin\Glpiidentity\IdpGroup;
 use GlpiPlugin\Glpiidentity\Link;
+use GlpiPlugin\Glpiidentity\AttributeMap;
 use GlpiPlugin\Glpiidentity\Mapping;
 use GlpiPlugin\Glpiidentity\Source;
 
-define('PLUGIN_GLPIIDENTITY_VERSION', '0.2.0');
+define('PLUGIN_GLPIIDENTITY_VERSION', '0.3.0');
 define('PLUGIN_GLPIIDENTITY_MIN_GLPI', '11.0');
 
 define('PLUGIN_GLPIIDENTITY_CONFIG_CONTEXT', 'plugin:glpiidentity');
@@ -59,6 +60,7 @@ function plugin_init_glpiidentity()
     // without it declares the type to GLPI and leaves getTabNameForItem()
     // never being called — the tab simply does not appear, with no error.
     Plugin::registerClass(Mapping::class, ['addtabon' => [Source::class]]);
+    Plugin::registerClass(AttributeMap::class, ['addtabon' => [Source::class]]);
     Plugin::registerClass(IdpGroup::class, ['addtabon' => [Source::class]]);
     Plugin::registerClass(Link::class, ['addtabon' => [Source::class]]);
 
