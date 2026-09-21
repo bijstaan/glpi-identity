@@ -276,6 +276,7 @@ half. A row names a GLPI field and where its value comes from:
 | Phone | `phoneNumbers[type eq "work"].value` | `phone_number` |
 | Administrative number | `urn:…:enterprise:2.0:User:employeeNumber` | `employee_id` |
 | Location | `addresses[type eq "work"].locality` | |
+| Supervisor | `urn:…:enterprise:2.0:User:manager.value` | `manager` |
 
 Both sides may be filled in and usually are: the same field is fed by SCIM when
 a connector pushes an update and by the id token when the person signs in, and
@@ -295,6 +296,29 @@ form — `urn:…:2.0:User:manager.displayName` — which is what SCIM says and,
 usefully, what Entra's own mapping screen shows. The same flattened bag is what
 rules match on, so a rule can now test `title` or `department` on a SCIM update
 and not only at sign-in.
+
+**Supervisor is a reference, not a value.** Connectors disagree about what they
+put in a manager attribute — Entra's is a Reference-type mapping whose
+Referenced Object Attribute is set per tenant, so it may be `objectId`,
+`userPrincipalName` or `mail`, and Okta sends the manager's login. All of them
+work: the value is tried as a directory id (our SCIM resource id, the
+`externalId`, then the OIDC `sub`), then as a GLPI username, then as a verified
+email address.
+
+Every one of those steps is confined to **this source's own links**, which is
+what makes offering username and email safe here at all. The "identity is not
+email" rule above is about matching *across* sources; inside one source the
+directory already owns every candidate. It matters more than it looks, because
+`users_id_supervisor` steers GLPI's validation and approval routing — a
+reference that could escape the source would be a way to route another
+organisation's approvals through a stranger. Two candidates matching is refused
+rather than guessed at.
+
+A manager who has not been provisioned yet resolves to nothing and is left for
+the next sync, rather than failing the update: connectors provision people in no
+particular order, and a manager routinely arrives after their reports. A manager
+who resolves to the person themselves is refused — GLPI would store it and then
+route their own approvals back to them.
 
 Three things worth knowing before you map a field:
 

@@ -86,7 +86,20 @@ class Mapping extends CommonDBChild
      * authenticate. Everything here is descriptive: worst case a rule writes a
      * wrong phone number.
      *
-     * @return array<string,array{label:string,itemtype:?class-string}>
+     * Three kinds, and the third is the one to be careful with:
+     *
+     *  - `itemtype` null — a plain column, written as text;
+     *  - `itemtype` a dropdown class — matched by name, created if absent;
+     *  - `reference` — a pointer to another *user*, resolved through this
+     *    source's own links and never created.
+     *
+     * A reference deliberately does not travel as an `itemtype`. The dropdown
+     * branch calls `Dropdown::importExternal()`, which creates the row when it
+     * finds nothing — and a field that creates GLPI *users* out of whatever a
+     * directory put in a manager attribute is a very different thing from one
+     * that creates a Location called "London".
+     *
+     * @return array<string,array{label:string,itemtype:?class-string,reference?:class-string}>
      */
     public static function assignableFields(): array
     {
@@ -99,6 +112,11 @@ class Mapping extends CommonDBChild
             'phone2'              => ['label' => __('Phone 2'), 'itemtype' => null],
             'mobile'              => ['label' => __('Mobile phone'), 'itemtype' => null],
             'comment'             => ['label' => __('Comments'), 'itemtype' => null],
+            'users_id_supervisor' => [
+                'label'     => __('Supervisor'),
+                'itemtype'  => null,
+                'reference' => \User::class,
+            ],
         ];
     }
 

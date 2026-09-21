@@ -395,6 +395,11 @@ class AttributeMap extends CommonDBChild
         echo "<div class='form-text'>"
            . __s('Fields already written by a mapping rule on this source are not listed: one '
                . 'field, one source of truth.', 'glpiidentity')
+           . '<br>'
+           . __s('Supervisor is a reference: the value is looked up among this source\'s own '
+               . 'people, by directory id, then username, then email address. Somebody not '
+               . 'provisioned yet is left for the next sync rather than treated as an error.',
+               'glpiidentity')
            . '</div></td><td colspan="2"></td></tr>';
 
         echo "<tr class='tab_bg_1'><td>" . __s('SCIM attribute', 'glpiidentity') . '</td><td>';

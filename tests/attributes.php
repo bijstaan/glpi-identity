@@ -33,6 +33,7 @@ require '/var/www/glpi/vendor/autoload.php';
 (new Glpi\Kernel\Kernel(Glpi\Application\Environment::PRODUCTION->value))->boot();
 
 use GlpiPlugin\Glpiidentity\AttributeMap;
+use GlpiPlugin\Glpiidentity\Link;
 use GlpiPlugin\Glpiidentity\Mapper;
 use GlpiPlugin\Glpiidentity\Mapping;
 use GlpiPlugin\Glpiidentity\Scim\UserResource;
@@ -279,6 +280,89 @@ check(
     (string) $user->fields['phone'] === 'still here',
     (string) $user->fields['phone']
 );
+
+// ------------------------------------------------- supervisor, a reference
+
+echo "\nResolving a supervisor\n";
+
+// Two colleagues of the probe, provisioned by the same source: a manager to
+// point at, and a stranger belonging to nobody, to prove the lookup cannot
+// reach outside the source.
+$boss        = new User();
+$boss_id     = (int) $boss->add(['name' => 'grace@example.com', 'is_active' => 1, 'entities_id' => $eid]);
+$made_user[] = $boss_id;
+(new UserEmail())->add(['users_id' => $boss_id, 'email' => 'grace.hopper@example.com', 'is_default' => 1]);
+
+$stranger      = new User();
+$stranger_id   = (int) $stranger->add(['name' => 'outsider@example.com', 'is_active' => 1, 'entities_id' => $eid]);
+$made_user[]   = $stranger_id;
+
+$link = new Link();
+$made_link = (int) $link->add([
+    'plugin_glpiidentity_sources_id' => $sid,
+    'users_id'    => $boss_id,
+    'scim_id'     => '11111111-2222-3333-4444-555555555555',
+    'external_id' => 'grace-object-id',
+    'subject'     => 'grace-oidc-sub',
+]);
+
+check('the supervisor field is mappable', $map('users_id_supervisor', 'urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager.value', 'manager') !== false, implode(' ', refusals()));
+
+$supervisor = static function (string $value) use ($source, $user, $uid): int {
+    $user->update(['id' => $uid, 'users_id_supervisor' => 0]);
+    $user->getFromDB($uid);
+    Mapper::apply($source, $user, ['urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager.value' => [$value]]);
+    $user->getFromDB($uid);
+
+    return (int) $user->fields['users_id_supervisor'];
+};
+
+check('by the directory object id', $supervisor('grace-object-id') === $boss_id);
+check('by our own SCIM resource id', $supervisor('11111111-2222-3333-4444-555555555555') === $boss_id);
+check('by the OIDC subject', $supervisor('grace-oidc-sub') === $boss_id);
+check('by UPN, which is the GLPI username', $supervisor('grace@example.com') === $boss_id);
+check('by a verified email address', $supervisor('grace.hopper@example.com') === $boss_id);
+
+check(
+    'a user this source does not own is not reachable',
+    $supervisor('outsider@example.com') === 0,
+    'a reference that escaped the source would route another org\'s approvals'
+);
+check(
+    'nor is an address nobody holds',
+    $supervisor('nobody@example.com') === 0
+);
+
+check(
+    'somebody not provisioned yet is left for the next sync, not an error',
+    $supervisor('not-here-yet-object-id') === 0,
+    'connectors provision managers in no particular order'
+);
+
+check(
+    'the user cannot be made their own supervisor',
+    $supervisor('glpiid-attr-probe') === 0,
+    'GLPI would store it and route their own approvals back to them'
+);
+
+// Clearing is the "present and empty" case again, and for a reference it has
+// to mean 0 rather than the empty string.
+$user->update(['id' => $uid, 'users_id_supervisor' => $boss_id]);
+$user->getFromDB($uid);
+Mapper::apply($source, $user, ['urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager.value' => ['']]);
+$user->getFromDB($uid);
+check('an explicitly empty manager clears it', (int) $user->fields['users_id_supervisor'] === 0);
+
+$user->update(['id' => $uid, 'users_id_supervisor' => $boss_id]);
+$user->getFromDB($uid);
+Mapper::apply($source, $user, ['something' => ['else']]);
+$user->getFromDB($uid);
+check(
+    'but a run carrying no manager attribute leaves it alone',
+    (int) $user->fields['users_id_supervisor'] === $boss_id
+);
+
+$DB->delete(Link::getTable(), ['id' => $made_link]);
 
 echo "\n" . ($failures === []
     ? "\033[32mall checks passed\033[0m\n"

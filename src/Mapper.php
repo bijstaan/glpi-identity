@@ -299,6 +299,50 @@ final class Mapper
                 continue;
             }
 
+            // A pointer to another user, resolved through this source's own
+            // links. Checked before the dropdown branch, which creates what it
+            // cannot find — the wrong behaviour entirely for a person.
+            if (isset($allowed[$name]['reference'])) {
+                if (trim($value) === '') {
+                    // Said explicitly, so honoured: the directory is telling us
+                    // this person has no supervisor any more.
+                    if ((int) ($user->fields[$name] ?? 0) !== 0) {
+                        $update[$name] = 0;
+                        $changes[]     = sprintf('cleared %s', $name);
+                    }
+
+                    continue;
+                }
+
+                $resolved = Link::resolveUser($source, $value);
+
+                if ($resolved === 0) {
+                    // Nobody here yet. Connectors provision in no particular
+                    // order, so a manager routinely arrives before — or after —
+                    // the person they manage, and failing would make a
+                    // transient ordering quirk permanent. The next sync fixes
+                    // it, exactly as it does for a group member who has not
+                    // been created yet.
+                    $changes[] = sprintf('could not resolve %s from "%s"', $name, $value);
+                    continue;
+                }
+
+                if ($resolved === (int) $user->getID()) {
+                    // GLPI will store it, and then route the person's own
+                    // approvals back to them. A directory that says somebody
+                    // manages themselves is describing a vacancy.
+                    $changes[] = sprintf('refused %s pointing at the user themselves', $name);
+                    continue;
+                }
+
+                if ((int) ($user->fields[$name] ?? 0) !== $resolved) {
+                    $update[$name] = $resolved;
+                    $changes[]     = sprintf('set %s to user #%d', $name, $resolved);
+                }
+
+                continue;
+            }
+
             $itemtype = $allowed[$name]['itemtype'];
 
             if ($itemtype !== null) {

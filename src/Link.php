@@ -89,6 +89,105 @@ class Link extends CommonDBTM
     }
 
     /**
+     * The GLPI user a directory meant, given whatever it used to name them.
+     *
+     * A manager attribute is a *reference*, and connectors disagree about what
+     * they put in it. Entra's is a Reference-type mapping whose Referenced
+     * Object Attribute is chosen per tenant: `objectId` in some, `userPrincipalName`
+     * or `mail` in plenty of others. Okta sends the manager's login. So this
+     * tries the identifiers in order of how much they can be trusted:
+     *
+     *  1. our own SCIM resource id, then the directory's `externalId`, then the
+     *     OIDC `sub` — all opaque, stable, and issued by the directory;
+     *  2. the GLPI username, which is the UPN for a provisioned account;
+     *  3. a verified email address on the account.
+     *
+     * **Every step is confined to this source's own links.** That is what makes
+     * steps 2 and 3 safe to offer at all: the "identity is not email" rule this
+     * class exists to enforce is about matching *across* sources, where an email
+     * match hands one organisation's directory an account belonging to another.
+     * Inside a single source the directory already owns every candidate, so an
+     * address is just a slower way of naming somebody it could name anyway —
+     * and `users_id_supervisor` steers GLPI's validation and approval routing,
+     * so a reference that could escape the source would be a way to route
+     * another organisation's approvals through a stranger.
+     *
+     * Two matches are refused rather than guessed at, the same as an invitation
+     * claimed by an address two accounts hold.
+     *
+     * @return int a GLPI user id, or 0 when nothing here names one
+     */
+    public static function resolveUser(Source $source, string $needle): int
+    {
+        /** @var \DBmysql $DB */
+        global $DB;
+
+        $needle = trim($needle);
+        if ($needle === '') {
+            return 0;
+        }
+
+        $sources_id = (int) $source->getID();
+
+        foreach (['scim_id', 'external_id', 'subject'] as $column) {
+            $link = self::findOne([
+                'plugin_glpiidentity_sources_id' => $sources_id,
+                $column                          => $needle,
+            ]);
+
+            if ($link !== null) {
+                return (int) $link->fields['users_id'];
+            }
+        }
+
+        $byName = [];
+        foreach (
+            $DB->request([
+                'SELECT'     => ['l.users_id'],
+                'FROM'       => self::getTable() . ' AS l',
+                'INNER JOIN' => [
+                    User::getTable() . ' AS u' => ['ON' => ['u' => 'id', 'l' => 'users_id']],
+                ],
+                'WHERE'      => [
+                    'l.plugin_glpiidentity_sources_id' => $sources_id,
+                    'u.name'                           => $needle,
+                    'u.is_deleted'                     => 0,
+                ],
+            ]) as $row
+        ) {
+            $byName[(int) $row['users_id']] = true;
+        }
+
+        if (count($byName) === 1) {
+            return (int) array_key_first($byName);
+        }
+        if ($byName !== []) {
+            return 0;
+        }
+
+        $byEmail = [];
+        foreach (
+            $DB->request([
+                'SELECT'     => ['l.users_id'],
+                'FROM'       => self::getTable() . ' AS l',
+                'INNER JOIN' => [
+                    User::getTable() . ' AS u' => ['ON' => ['u' => 'id', 'l' => 'users_id']],
+                    \UserEmail::getTable() . ' AS e' => ['ON' => ['e' => 'users_id', 'u' => 'id']],
+                ],
+                'WHERE'      => [
+                    'l.plugin_glpiidentity_sources_id' => $sources_id,
+                    'e.email'                          => $needle,
+                    'u.is_deleted'                     => 0,
+                ],
+            ]) as $row
+        ) {
+            $byEmail[(int) $row['users_id']] = true;
+        }
+
+        return count($byEmail) === 1 ? (int) array_key_first($byEmail) : 0;
+    }
+
+    /**
      * Every link a source holds, oldest first.
      *
      * @return self[]
