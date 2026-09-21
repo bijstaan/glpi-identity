@@ -90,14 +90,11 @@ final class LoginButtons
             }
         }
 
-        // Anyone other than the house provider is reached by domain. If nobody
-        // has claimed a domain, the box would be a dead end, so it is not shown.
-        $has_domains = false;
-        foreach ($ready as $source) {
-            if ($source->domains() !== []) {
-                $has_domains = true;
-                break;
-            }
+        // Nothing here could send anybody anywhere. Emit nothing rather than a
+        // heading over an empty box — and, more importantly, leave GLPI's own
+        // form alone, because hideLocalForm() runs only as part of this markup.
+        if (!self::canRoute($ready)) {
+            return '';
         }
 
         $html = self::styles();
@@ -112,29 +109,27 @@ final class LoginButtons
                 . "<i class='ti ti-login me-2'></i>"
                 . $e(sprintf(__('Sign in with %s', 'glpiidentity'), $house->buttonLabel()))
                 . '</a>';
-        }
 
-        if ($house !== null && $has_domains) {
             $html .= "<div class='glpiidentity-or'><span>" . __s('or', 'glpiidentity') . '</span></div>';
         }
 
-        if ($has_domains) {
-            $html .= "<label class='form-label' for='glpiidentity-email'>"
-                . __s('Use your organisation account', 'glpiidentity') . '</label>';
-            $html .= "<div class='input-group'>";
-            // No name, no required — see the class docblock.
-            $html .= "<input type='email' id='glpiidentity-email' class='form-control' "
-                . "autocomplete='email' spellcheck='false' "
-                . "placeholder='" . __s('you@example.com', 'glpiidentity') . "'>";
-            $html .= "<button type='button' class='btn btn-outline-primary' id='glpiidentity-continue' "
-                . "aria-label='" . __s('Continue', 'glpiidentity') . "'>"
-                . "<i class='ti ti-arrow-right'></i></button>";
-            $html .= '</div>';
-            $html .= "<div class='form-text glpiidentity-hint'>"
-                . __s('We will take you to your organisation to sign in.', 'glpiidentity')
-                . '</div>';
-            $html .= "<div class='glpiidentity-problem' role='alert' hidden></div>";
-        }
+        // Always present past the guard above: there is a route, so the box has
+        // somewhere to send them.
+        $html .= "<label class='form-label' for='glpiidentity-email'>"
+            . __s('Use your organisation account', 'glpiidentity') . '</label>';
+        $html .= "<div class='input-group'>";
+        // No name, no required — see the class docblock.
+        $html .= "<input type='email' id='glpiidentity-email' class='form-control' "
+            . "autocomplete='email' spellcheck='false' "
+            . "placeholder='" . __s('you@example.com', 'glpiidentity') . "'>";
+        $html .= "<button type='button' class='btn btn-outline-primary' id='glpiidentity-continue' "
+            . "aria-label='" . __s('Continue', 'glpiidentity') . "'>"
+            . "<i class='ti ti-arrow-right'></i></button>";
+        $html .= '</div>';
+        $html .= "<div class='form-text glpiidentity-hint'>"
+            . __s('We will take you to your organisation to sign in.', 'glpiidentity')
+            . '</div>';
+        $html .= "<div class='glpiidentity-problem' role='alert' hidden></div>";
 
         if (!self::localLoginVisible()) {
             $html .= "<div class='glpiidentity-localhint'>"
@@ -144,9 +139,45 @@ final class LoginButtons
 
         $html .= '</div>';
 
-        $html .= self::behaviour($has_domains, !self::localLoginVisible());
+        $html .= self::behaviour(!self::localLoginVisible());
 
         return $html;
+    }
+
+    /**
+     * Can the email box actually send anybody anywhere?
+     *
+     * Two routes, and either is enough:
+     *
+     *  - a source has **claimed a domain**, so an address at it routes there;
+     *  - a source is the **house provider**, which is where an address at no
+     *    claimed domain lands — `front/sso.php` is literally
+     *    `forEmail($email) ?? houseDefault()`.
+     *
+     * The second used not to count, and that hid the box on the commonest
+     * single-organisation setup there is: one house provider, no domains
+     * claimed because there is nobody else to route to. Everybody in such an
+     * instance is served by the fallback, so the box worked perfectly — it was
+     * simply never rendered.
+     *
+     * Public, and separated from the markup, so the regression test can state
+     * the rule directly against constructed sources. Asserting it through the
+     * rendered page instead would mean persisting a second house provider,
+     * which {@see Source::prepareInputForAdd()} rightly refuses when one
+     * already exists — so the test would be unrunnable on any instance that is
+     * actually configured.
+     *
+     * @param Source[] $ready sources that pass {@see Source::ssoReady()}
+     */
+    public static function canRoute(array $ready): bool
+    {
+        foreach ($ready as $source) {
+            if ($source->domains() !== [] || (int) ($source->fields['is_default'] ?? 0) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -268,12 +299,11 @@ CSS;
      * page that complained about missing credentials when somebody typed their
      * email.
      */
-    private static function behaviour(bool $has_domains, bool $hide_local): string
+    private static function behaviour(bool $hide_local): string
     {
         $endpoint = json_encode(Url::to('front/sso.php/start'), JSON_UNESCAPED_SLASHES);
         $prompt   = json_encode(__('Enter your work email address.', 'glpiidentity'));
         $hide     = $hide_local ? 'true' : 'false';
-        $wire     = $has_domains ? 'true' : 'false';
 
         return <<<JS
 <script>
@@ -288,7 +318,7 @@ CSS;
         hideLocalForm();
     }
 
-    if ({$wire} && field && button) {
+    if (field && button) {
         button.addEventListener('click', go);
 
         field.addEventListener('keydown', function (event) {
@@ -339,10 +369,16 @@ CSS;
      * the whole column takes the username, password, login-source, remember-me
      * and submit button with it in one go.
      *
-     * This only ever runs as part of markup that is emitted for a *ready*
-     * identity source. That ordering is the safety property: if no source can
-     * sign anybody in, none of this is on the page, and GLPI's own form is left
-     * exactly where it was.
+     * This only ever runs as part of markup that is emitted when some source is
+     * ready *and* the page offers a route to it. That ordering is the safety
+     * property: with nothing that can sign anybody in, none of this is on the
+     * page and GLPI's own form is left exactly where it was.
+     *
+     * The two halves are both load-bearing. "A ready source exists" alone is
+     * not enough — a ready house provider with no claimed domain and no button
+     * label used to render a block with no control in it, and this function
+     * then took the password form away and left the page with no way to sign in
+     * at all bar the `?local=1` link.
      */
     function hideLocalForm() {
         var row = block && block.closest('.row');

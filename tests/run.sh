@@ -22,9 +22,10 @@ trap 'kill $idp 2>/dev/null' EXIT
 sleep 1
 
 status=0
-# Needs neither the mock provider nor the web server - it drives the mapping
-# engine directly - so it runs first and fails fast.
+# Neither needs the mock provider or the web server - they drive the mapping
+# engine and the login-page renderer directly - so they run first and fail fast.
 php tests/mapping.php || status=1
+php tests/login.php || status=1
 php tests/scim.php || status=1
 php tests/oidc.php || status=1
 
