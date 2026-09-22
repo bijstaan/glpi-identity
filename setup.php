@@ -44,6 +44,13 @@ function plugin_init_glpiidentity()
 
     $PLUGIN_HOOKS['csrf_compliant']['glpiidentity'] = true;
 
+    // The plugin's rights, on Administration > Profiles.
+    //
+    // Core stores a plugin's rights and saves them back with its own, but
+    // renders a form for its rights only — so without this tab the ones below
+    // are enforced everywhere and grantable nowhere but SQL.
+    Plugin::registerClass(\GlpiPlugin\Glpiidentity\Profile::class, ['addtabon' => ['Profile']]);
+
     // Setup > Plugins links the settings page. No menu_toadd for it: a second
     // link to the same page is what makes the Setup menu unreadable once
     // several plugins each add one.
