@@ -86,6 +86,18 @@ final class Mapper
             }
         }
 
+        // Mirrored directory groups. Membership of a mirror is the directory's
+        // membership, so it goes through the same dynamic sync as a mapped
+        // group — which is also what stops the next sign-in or SCIM update
+        // withdrawing it again as "no rule asked for this".
+        if ((int) $source->fields['mirror_groups'] === 1) {
+            $mirrored = IdpGroup::mirroredFor($source->getID(), $claims[$source->groupsClaim()] ?? []);
+            foreach ($mirrored as $groups_id => $name) {
+                $plan['groups'][]  = $groups_id;
+                $plan['matched'][] = sprintf('member of directory group "%s" → mirrored GLPI group', $name);
+            }
+        }
+
         // Pass-through: fields copied from what the directory said about *this*
         // person, rather than set to a constant by a rule. A field cannot be
         // written by both — an attribute map naming a field a static rule
@@ -132,6 +144,67 @@ final class Mapper
         }
 
         return $changes;
+    }
+
+    /**
+     * Re-run every rule for every account a source manages.
+     *
+     * Rules otherwise reach a person only when the directory next mentions
+     * them. That is fine for a rule changed on a busy directory and useless
+     * for a quiet one — and it is the only way a group mirrored before
+     * mirrors were given members gets filled without waiting for Entra to
+     * re-send a membership it has no reason to re-send.
+     *
+     * Two limits, both because the only thing on record between sign-ins is
+     * directory-group membership. Accounts that only ever signed in over SSO
+     * have none recorded — their groups travel in the token — so recomputing
+     * them would strip everything; they are skipped. And a rule on any other
+     * claim (department, title) cannot be evaluated without the payload that
+     * carried it, so a source with one is refused rather than half-applied.
+     *
+     * @return array{users:int,changed:int,refused:?string}
+     */
+    public static function applyToSource(Source $source): array
+    {
+        foreach (Mapping::forSource($source->getID()) as $rule) {
+            if ((int) $rule->fields['is_active'] === 1 && (string) $rule->fields['claim'] !== $source->groupsClaim()) {
+                return [
+                    'users'   => 0,
+                    'changed' => 0,
+                    'refused' => sprintf(
+                        __('Not applied: the rule on "%s" can only be evaluated when the directory sends '
+                            . 'that attribute, so it will apply at each person\'s next sign-in or SCIM update.', 'glpiidentity'),
+                        $rule->fields['claim']
+                    ),
+                ];
+            }
+        }
+
+        $users   = 0;
+        $changed = 0;
+
+        foreach (Link::forSource($source->getID()) as $link) {
+            // Nothing on record for someone SCIM never touched: their groups
+            // arrive in the token, and "no groups" would be a lie.
+            if (
+                (int) $link->fields['is_scim_managed'] !== 1
+                && IdpGroup::namesForUser($source->getID(), (int) $link->fields['users_id']) === []
+            ) {
+                continue;
+            }
+
+            $user = $link->user();
+            if ($user === null || (int) $user->fields['is_deleted'] === 1) {
+                continue;
+            }
+
+            $users++;
+            if (self::apply($source, $user, Provisioning::claimsFor($source, (int) $user->getID())) !== []) {
+                $changed++;
+            }
+        }
+
+        return ['users' => $users, 'changed' => $changed, 'refused' => null];
     }
 
     /**
@@ -254,6 +327,18 @@ final class Mapper
         foreach ($wanted as $groups_id) {
             if (isset($existing[$groups_id])) {
                 unset($existing[$groups_id]);
+                continue;
+            }
+
+            // Already in it by hand. A second, dynamic row would be a duplicate
+            // membership, and withdrawing it later would look like removing
+            // somebody an administrator put there.
+            if (
+                countElementsInTable(Group_User::getTable(), [
+                    'users_id'  => $user->getID(),
+                    'groups_id' => $groups_id,
+                ]) > 0
+            ) {
                 continue;
             }
 

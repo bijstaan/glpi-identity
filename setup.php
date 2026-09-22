@@ -33,7 +33,7 @@ use GlpiPlugin\Glpiidentity\AttributeMap;
 use GlpiPlugin\Glpiidentity\Mapping;
 use GlpiPlugin\Glpiidentity\Source;
 
-define('PLUGIN_GLPIIDENTITY_VERSION', '0.3.0');
+define('PLUGIN_GLPIIDENTITY_VERSION', '0.4.0');
 define('PLUGIN_GLPIIDENTITY_MIN_GLPI', '11.0');
 
 define('PLUGIN_GLPIIDENTITY_CONFIG_CONTEXT', 'plugin:glpiidentity');

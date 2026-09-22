@@ -327,7 +327,7 @@ final class Server
             // object of attributes. Entra sends the first, Okta the second.
             $attributes = $path === '' && is_array($value)
                 ? $value
-                : [$path => $value];
+                : [($path === '' ? 'members' : $path) => $value];
 
             $bag = array_merge($bag, UserResource::attributes($attributes));
 
@@ -520,7 +520,6 @@ final class Server
         $external_id = trim((string) ($request->body['externalId'] ?? $request->body['id'] ?? $name));
 
         $group = IdpGroup::upsert($source->getID(), $external_id, $name);
-        GroupResource::mirror($source, $group);
 
         $members = GroupResource::resolveMembers($source, (array) ($request->body['members'] ?? []));
         $group->setMembers($members['ids']);
@@ -542,6 +541,7 @@ final class Server
         $name = trim((string) ($request->body['displayName'] ?? ''));
         if ($name !== '' && $name !== (string) $group->fields['name']) {
             $group->update(['id' => $group->getID(), 'name' => $name]);
+            $group->fields['name'] = $name;
         }
 
         $before = $group->memberIds();
@@ -587,46 +587,86 @@ final class Server
                 continue;
             }
 
-            $op   = strtolower((string) ($operation['op'] ?? ''));
-            $path = trim((string) ($operation['path'] ?? ''));
+            $op    = strtolower((string) ($operation['op'] ?? ''));
+            $path  = trim((string) ($operation['path'] ?? ''));
+            $value = $operation['value'] ?? null;
 
-            if (stripos($path, 'displayname') === 0) {
-                $name = trim((string) ($operation['value'] ?? ''));
-                if ($name !== '') {
-                    $group->update(['id' => $group->getID(), 'name' => $name]);
-                }
-                continue;
+            // No path: the value is an object of attributes, not a member list.
+            // Read as a member list, `{"displayName": "X"}` resolved to nobody
+            // and a replace then emptied the group. Each attribute is folded
+            // back into the path form and handled like one.
+            $pairs = $path === '' && is_array($value) && !array_is_list($value)
+                ? $value
+                : [$path => $value];
+
+            foreach ($pairs as $attribute => $attribute_value) {
+                $unknown += $this->patchGroupAttribute(
+                    $source,
+                    $group,
+                    $op,
+                    trim((string) $attribute),
+                    $attribute_value
+                );
             }
-
-            if (stripos($path, 'members') !== 0 && $path !== '') {
-                continue;
-            }
-
-            // `members[value eq "abc"]` names its target in the path; a plain
-            // `members` path carries it in the value.
-            $targets = [];
-            if (preg_match('/\[\s*value\s+eq\s+"([^"]+)"\s*\]/i', $path, $m) === 1) {
-                $targets[] = ['value' => $m[1]];
-            } else {
-                $value = $operation['value'] ?? [];
-                $targets = is_array($value) ? $value : [];
-            }
-
-            $resolved = GroupResource::resolveMembers($source, $targets);
-            $unknown += $resolved['unknown'];
-
-            match ($op) {
-                'add'     => array_map([$group, 'addMember'], $resolved['ids']),
-                'remove'  => array_map([$group, 'removeMember'], $resolved['ids']),
-                // A replace on `members` is a whole-membership statement.
-                'replace' => $group->setMembers($resolved['ids']),
-                default   => null,
-            };
         }
 
         $this->afterGroupChange($source, $group, $unknown, $before);
 
         return Response::ok(GroupResource::toScim($source, $group));
+    }
+
+    /**
+     * One group patch operation, on one attribute.
+     *
+     * @return int members named that this source has no user for
+     */
+    private function patchGroupAttribute(Source $source, IdpGroup $group, string $op, string $path, mixed $value): int
+    {
+        if (strcasecmp($path, 'displayName') === 0) {
+            $name = trim(is_scalar($value) ? (string) $value : '');
+            if ($name !== '' && $name !== (string) $group->fields['name']) {
+                $group->update(['id' => $group->getID(), 'name' => $name]);
+                $group->fields['name'] = $name;
+            }
+
+            return 0;
+        }
+
+        // externalId, meta and anything else: nothing here is keyed on them
+        // beyond the id the group was created with.
+        if (stripos($path, 'members') !== 0) {
+            return 0;
+        }
+
+        // `members[value eq "abc"]` names its target in the path; a plain
+        // `members` path carries it in the value — a list from Entra, a single
+        // object from some others.
+        $targets = [];
+        if (preg_match('/\[\s*value\s+eq\s+"([^"]+)"\s*\]/i', $path, $m) === 1) {
+            $targets[] = ['value' => $m[1]];
+        } elseif (is_array($value)) {
+            $targets = array_is_list($value) ? $value : [$value];
+        }
+
+        // RFC 7644 §3.5.2.2: remove on a multi-valued attribute with no filter
+        // and no value removes every value.
+        if ($op === 'remove' && $targets === [] && strcasecmp($path, 'members') === 0) {
+            $group->setMembers([]);
+
+            return 0;
+        }
+
+        $resolved = GroupResource::resolveMembers($source, $targets);
+
+        match ($op) {
+            'add'     => array_map([$group, 'addMember'], $resolved['ids']),
+            'remove'  => array_map([$group, 'removeMember'], $resolved['ids']),
+            // A replace on `members` is a whole-membership statement.
+            'replace' => $group->setMembers($resolved['ids']),
+            default   => null,
+        };
+
+        return $resolved['unknown'];
     }
 
     private function deleteGroup(Request $request, Source $source): Response
@@ -687,6 +727,12 @@ final class Server
      */
     private function afterGroupChange(Source $source, IdpGroup $group, int $unknown, array $before): void
     {
+        // Before the members are re-mapped, so the mirror exists — and has its
+        // current name — by the time the mapper looks for it. Every change
+        // passes through here, which is also what attaches a group that was
+        // first seen before the source was switched to mirror.
+        GroupResource::mirror($source, $group);
+
         $touched = array_unique(array_merge($before, $group->memberIds()));
 
         foreach ($touched as $users_id) {

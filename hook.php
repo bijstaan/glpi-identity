@@ -137,10 +137,15 @@ function plugin_glpiidentity_install()
                 `plugin_glpiidentity_sources_id` INT UNSIGNED NOT NULL,
                 `external_id` VARCHAR(255) NOT NULL,
                 `name` VARCHAR(255) NOT NULL,
+                -- The GLPI group this one is mirrored into, when the source
+                -- mirrors. Held by id rather than found by name, so a rename
+                -- on either side does not quietly detach the membership.
+                `groups_id` INT UNSIGNED NOT NULL DEFAULT 0,
                 `date_creation` TIMESTAMP NULL DEFAULT NULL,
                 `date_mod` TIMESTAMP NULL DEFAULT NULL,
                 PRIMARY KEY (`id`),
                 UNIQUE KEY `external` (`plugin_glpiidentity_sources_id`,`external_id`),
+                KEY `groups_id` (`groups_id`),
                 KEY `name` (`name`)
             ) ENGINE=InnoDB DEFAULT CHARSET=$charset COLLATE=$collate"
         );
@@ -259,6 +264,33 @@ function plugin_glpiidentity_install()
                 SET m.`target_entities_id` = s.`entities_id`"
         );
     }
+
+    if (!$DB->fieldExists(IdpGroup::getTable(), 'groups_id')) {
+        $DB->doQuery(
+            "ALTER TABLE `" . IdpGroup::getTable() . "`
+                ADD `groups_id` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `name`,
+                ADD KEY `groups_id` (`groups_id`)"
+        );
+        // Before this column, mirror() created the GLPI group and then forgot
+        // it — nothing ever put anyone in it. Reattach the groups it made, by
+        // the same name-and-entity test it used to decide they already existed,
+        // so the next sync fills them rather than creating a second copy.
+        $DB->doQuery(
+            "UPDATE `" . IdpGroup::getTable() . "` ig
+                JOIN `" . Source::getTable() . "` s ON s.`id` = ig.`plugin_glpiidentity_sources_id`
+                JOIN `glpi_groups` g ON g.`name` = ig.`name` AND g.`entities_id` = s.`entities_id`
+                SET ig.`groups_id` = g.`id`
+                WHERE s.`mirror_groups` = 1"
+        );
+    }
+
+    // Memberships whose group went with a purged source. Source::cleanDBonPurge
+    // used to drop the groups and leave these behind.
+    $DB->doQuery(
+        "DELETE m FROM `" . IdpGroup_User::getTable() . "` m
+            LEFT JOIN `" . IdpGroup::getTable() . "` g ON g.`id` = m.`plugin_glpiidentity_idpgroups_id`
+            WHERE g.`id` IS NULL"
+    );
 
     CronTask::register(
         Source::class,

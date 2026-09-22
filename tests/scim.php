@@ -30,7 +30,9 @@ require '/var/www/glpi/vendor/autoload.php';
 use GlpiPlugin\Glpiidentity\EventLog;
 use GlpiPlugin\Glpiidentity\IdpGroup;
 use GlpiPlugin\Glpiidentity\Link;
+use GlpiPlugin\Glpiidentity\Mapper;
 use GlpiPlugin\Glpiidentity\Mapping;
+use GlpiPlugin\Glpiidentity\Provisioning;
 use GlpiPlugin\Glpiidentity\Settings;
 use GlpiPlugin\Glpiidentity\Source;
 use GuzzleHttp\Client as HttpClient;
@@ -369,6 +371,72 @@ echo "\nUser sees their groups\n";
 $r = scim('GET', '/Users/' . $alice_id, $acme_token);
 check('the user resource lists the directory group',
     ($r['body']['groups'][0]['display'] ?? '') === 'Executive', $r['raw']);
+
+echo "\nEntra ID\n";
+
+// Entra's own sequence, from its SCIM reference: create the group with no
+// members and its objectId as externalId, then add people by PATCH with a
+// `$ref: null` beside each value. With mirroring on, the GLPI group this makes
+// used to stay empty for ever — mirror() created it and nothing filled it.
+$acme_source->update(['id' => $acme_source->getID(), 'mirror_groups' => 1]);
+$acme_source->getFromDB($acme_source->getID());
+
+$entra_guid = '0db508eb-91e2-46e4-809c-30dcbda0c685';
+$r = scim('POST', '/Groups', $acme_token, [
+    'schemas'     => ['urn:ietf:params:scim:schemas:core:2.0:Group',
+        'http://schemas.microsoft.com/2006/11/ResourceManagement/ADSCIM/2.0/Group'],
+    'externalId'  => $entra_guid,
+    'displayName' => 'glpiid Service Desk',
+    'meta'        => ['resourceType' => 'Group'],
+]);
+check('an Entra-shaped group create returns 201', $r['status'] === 201, $r['raw']);
+
+$entra_group = new IdpGroup();
+$entra_group->getFromDBByCrit([
+    'plugin_glpiidentity_sources_id' => $acme_source->getID(),
+    'external_id'                    => $entra_guid,
+]);
+$mirror = (int) ($entra_group->fields['groups_id'] ?? 0);
+if ($mirror > 0) {
+    $made_group[] = $mirror;
+}
+check('the mirrored GLPI group is created and remembered', $mirror > 0);
+
+$in_mirror = static fn(): bool => countElementsInTable(Group_User::getTable(), [
+    'users_id'   => $alice?->getID(),
+    'groups_id'  => $mirror,
+    'is_dynamic' => 1,
+]) === 1;
+
+$r = scim('PATCH', '/Groups/' . $entra_guid, $acme_token, [
+    'schemas'    => ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+    'Operations' => [['op' => 'Add', 'path' => 'members', 'value' => [['$ref' => null, 'value' => $alice_id]]]],
+]);
+check('Entra\'s capitalised Add is accepted', $r['status'] === 200, $r['raw']);
+check('and the member lands in the mirrored GLPI group', $in_mirror());
+
+$r = scim('PATCH', '/Groups/' . $entra_guid, $acme_token, [
+    'Operations' => [['op' => 'Replace', 'value' => ['id' => $entra_guid, 'displayName' => 'glpiid Service Desk']]],
+]);
+check('a pathless replace of displayName leaves the membership alone',
+    count($entra_group->memberIds()) === 1 && $in_mirror());
+
+// Sign-in: Entra's groups claim carries object ids, not names.
+Mapper::apply($acme_source, $alice, Provisioning::claimsFor(
+    $acme_source,
+    (int) $alice->getID(),
+    ['groups' => [$entra_guid, 'acme-grp-exec']]
+));
+check('a sign-in with object ids in the groups claim keeps the mirror', $in_mirror());
+check('and keeps name-keyed rules matching', $in_vip());
+
+$r = scim('PATCH', '/Groups/' . $entra_guid, $acme_token, [
+    'Operations' => [['op' => 'Remove', 'path' => 'members', 'value' => [['$ref' => null, 'value' => $alice_id]]]],
+]);
+check('an Entra Remove takes them out of the mirror again', $r['status'] === 200 && !$in_mirror());
+
+$acme_source->update(['id' => $acme_source->getID(), 'mirror_groups' => 0]);
+$acme_source->getFromDB($acme_source->getID());
 
 echo "\nDeprovisioning\n";
 

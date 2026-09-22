@@ -224,6 +224,18 @@ class Source extends CommonDBTM
 
     // ---------------------------------------------------------------- secrets
 
+    /**
+     * The claim directory-group membership travels in.
+     *
+     * One place for the fallback, because the mapper, the mirror and the
+     * mapping form all have to agree on it: a rule on "groups" when the source
+     * says "roles" is a rule that never fires.
+     */
+    public function groupsClaim(): string
+    {
+        return (string) ($this->fields['claim_groups'] ?? '') ?: 'groups';
+    }
+
     public function clientSecret(): string
     {
         $raw = (string) ($this->fields['client_secret'] ?? '');
@@ -709,6 +721,16 @@ class Source extends CommonDBTM
         // administrative act about a configuration; deleting the people it
         // provisioned is not implied by it, and would take their ticket history
         // with them.
+        // Memberships first: they are keyed by group, not by source, so once
+        // the groups are gone nothing can find them any more.
+        $DB->delete(IdpGroup_User::getTable(), [
+            'plugin_glpiidentity_idpgroups_id' => new \Glpi\DBAL\QuerySubQuery([
+                'SELECT' => 'id',
+                'FROM'   => IdpGroup::getTable(),
+                'WHERE'  => ['plugin_glpiidentity_sources_id' => $this->getID()],
+            ]),
+        ]);
+
         foreach ([Mapping::getTable(), Link::getTable(), IdpGroup::getTable()] as $table) {
             $DB->delete($table, ['plugin_glpiidentity_sources_id' => $this->getID()]);
         }
@@ -1050,9 +1072,10 @@ class Source extends CommonDBTM
         echo '<td>' . __s('Mirror unmapped groups', 'glpiidentity') . '</td><td>';
         Dropdown::showYesNo('mirror_groups', $this->fields['mirror_groups']);
         echo "<div class='form-text'>"
-           . __s('On, a directory group with no mapping becomes a GLPI group of the same name in '
-               . 'this entity. Off — the default — the directory\'s group names stay on the '
-               . 'Directory groups tab and only mapped ones reach GLPI.', 'glpiidentity')
+           . __s('On, a directory group that no "Add to GLPI group" mapping picks up becomes a GLPI '
+               . 'group of the same name in this entity, and its members follow the directory. Off '
+               . '— the default — the directory\'s group names stay on the Directory groups tab and '
+               . 'only mapped ones reach GLPI.', 'glpiidentity')
            . '</div></td></tr>';
     }
 }

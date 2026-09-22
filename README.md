@@ -259,7 +259,24 @@ Group membership reaches a mapping by two routes and needs only one:
 The second is what makes group mapping work where the first is unavailable, and
 is why SCIM groups are stored as the organisation's groups rather than mirrored into
 GLPI's group tree. Mirroring is available and off by default: one shared tree
-filling up with a dozen organisations' "All Staff" helps nobody.
+filling up with a dozen organisations' "All Staff" helps nobody. When it is on,
+a mirrored group's membership follows the directory exactly as a mapped group's
+does — added, withdrawn, and marked dynamic so hand-made memberships are left
+alone.
+
+Entra ID puts group **object ids** in the `groups` claim, not names. Because
+those are the same ids its SCIM connector sends as each group's `externalId`,
+a claim value this source has seen over SCIM gains the group's name beside it,
+so a rule written as *is IT Staff* matches at sign-in as well as over SCIM.
+
+The **Directory groups** tab lists every group the directory has sent, its
+members, how many rules act on it and what it is mirrored as, with a one-click
+*Grant a profile* for each. The rule form shows only the fields its action uses
+and reads the rule back as a sentence. **Apply to everyone now** on the Mappings
+tab re-runs the rules for every directory-managed account, rather than waiting
+for the directory to mention each person again; it refuses on a source with
+rules on other attributes (department, title), because those cannot be
+evaluated without the payload that carried them.
 
 ## Attribute maps
 

@@ -143,6 +143,31 @@ class Mapping extends CommonDBChild
         return array_values(getSonsOf('glpi_entities', (int) $source->fields['entities_id']));
     }
 
+    /**
+     * The GLPI groups a source's rules may add people to: those in its subtree,
+     * and recursive ones above it that its entity already inherits.
+     *
+     * @return int[]
+     */
+    public static function groupsInScope(int $sources_id): array
+    {
+        $scope = self::scopeFor($sources_id);
+        if ($scope === []) {
+            return [];
+        }
+
+        $where = [['entities_id' => $scope]];
+        $above = array_values(getAncestorsOf('glpi_entities', $scope[0]));
+        if ($above !== []) {
+            $where[] = ['entities_id' => $above, 'is_recursive' => 1];
+        }
+
+        return array_map(
+            'intval',
+            array_column(getAllDataFromTable(Group::getTable(), ['OR' => $where]), 'id')
+        );
+    }
+
     /** The entity this rule grants its profile in. */
     public function targetEntity(): int
     {
@@ -286,10 +311,36 @@ class Mapping extends CommonDBChild
             return false;
         };
 
+        // The form's "Match on: directory group" is a claim chosen for the
+        // administrator, not a column: it is whatever claim the source carries
+        // group membership in, which they should not have to know.
+        if (($input['_match_on'] ?? '') === 'group') {
+            $owner = new Source();
+            if (
+                $owner->getFromDB((int) ($input['plugin_glpiidentity_sources_id']
+                    ?? $this->fields['plugin_glpiidentity_sources_id'] ?? 0))
+            ) {
+                $input['claim'] = $owner->groupsClaim();
+            }
+        }
+
+        if (array_key_exists('claim', $input) && trim((string) $input['claim']) === '') {
+            return $refuse(__('Say which claim or attribute this rule looks at.', 'glpiidentity'));
+        }
+
         if ($action === self::ACTION_GROUP) {
             $target = (int) ($input['groups_id'] ?? $this->fields['groups_id'] ?? 0);
             if ($target <= 0) {
                 return $refuse(__('Choose the GLPI group this rule should add the user to.', 'glpiidentity'));
+            }
+
+            // The same boundary as a profile's entity. The form only offers
+            // groups a source's subtree can see; this is what stops a crafted
+            // post naming another organisation's group.
+            $sources_id = (int) ($input['plugin_glpiidentity_sources_id']
+                ?? $this->fields['plugin_glpiidentity_sources_id'] ?? 0);
+            if (!in_array($target, self::groupsInScope($sources_id), true)) {
+                return $refuse(__('A rule can only add people to a group its source\'s entity can see.', 'glpiidentity'));
             }
         }
 
@@ -394,87 +445,158 @@ class Mapping extends CommonDBChild
         return true;
     }
 
+    /**
+     * The condition half of a rule, the way an administrator would say it.
+     *
+     * Nearly every rule is "in directory group X", and that is how people
+     * think of it; the claim name is plumbing, shown only when a rule looks at
+     * something other than group membership.
+     */
+    private function conditionHtml(Source $source, callable $e): string
+    {
+        $operator = (string) $this->fields['match_operator'];
+        $verb     = $e(self::operators()[$operator] ?? $operator);
+        $value    = '<strong>' . $e($this->fields['match_value']) . '</strong>';
+
+        if ((string) $this->fields['claim'] === $source->groupsClaim()) {
+            return $operator === self::OP_EQUALS
+                ? __s('In directory group', 'glpiidentity') . ' ' . $value
+                : __s('In a directory group that', 'glpiidentity') . ' ' . $verb . ' ' . $value;
+        }
+
+        return '<code>' . $e($this->fields['claim']) . '</code> ' . $verb . ' ' . $value;
+    }
+
+    /**
+     * The outcome half.
+     *
+     * `getDropdownName()` returns the row as it is stored, markup and all —
+     * GLPI 11 escapes on output, not on input — so a group name is
+     * attacker-supplied text here: `group` UPDATE is a much more widely granted
+     * right than this page needs, and a mirroring source creates groups
+     * straight from a SCIM `displayName`. The badges are ours and stay outside
+     * the escape.
+     */
+    private function outcomeHtml(callable $e): string
+    {
+        return match ((string) $this->fields['action']) {
+            self::ACTION_GROUP   => __s('Add to GLPI group', 'glpiidentity') . ' <strong>'
+                . $e(Dropdown::getDropdownName('glpi_groups', (int) $this->fields['groups_id'])) . '</strong>',
+            self::ACTION_PROFILE => __s('Grant', 'glpiidentity') . ' <strong>'
+                . $e(Dropdown::getDropdownName('glpi_profiles', (int) $this->fields['profiles_id'])) . '</strong> '
+                . __s('in', 'glpiidentity') . ' '
+                . $e(Dropdown::getDropdownName('glpi_entities', $this->targetEntity()))
+                . ((int) $this->fields['is_dynamic_recursive'] === 1
+                    ? ' <span class="badge bg-azure-lt">' . __s('and below', 'glpiidentity') . '</span>' : ''),
+            default              => __s('Set', 'glpiidentity') . ' '
+                . $e(self::assignableFields()[$this->fields['field_name']]['label'] ?? $this->fields['field_name'])
+                . ' = <strong>' . $e($this->fields['field_value']) . '</strong>',
+        };
+    }
+
     private static function showForSource(Source $source): void
     {
         $e     = static fn($v): string => htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8');
         $rules = self::forSource($source->getID());
         $can   = $source->canUpdateItem();
+        $form  = Url::to('front/mapping.form.php');
 
         echo "<div class='glpiidentity-mappings'>";
 
-        echo '<p class="text-muted">'
-           . __s('Rules are read top to bottom and every matching rule applies — this is not a '
-               . 'first-match-wins list. A user who is in two mapped groups gets both.', 'glpiidentity')
+        echo "<div class='d-flex flex-wrap align-items-start gap-2 mb-3'>";
+        echo '<p class="text-muted mb-0 flex-grow-1">'
+           . __s('Every matching rule applies, top to bottom — a user in two mapped groups gets both. '
+               . 'Rules run whenever this directory signs somebody in or changes them over SCIM.', 'glpiidentity')
            . '</p>';
+
+        if ($can) {
+            echo "<a class='btn btn-primary' href='" . $e($form)
+               . '?plugin_glpiidentity_sources_id=' . (int) $source->getID() . "'>"
+               . "<i class='ti ti-plus me-1'></i>" . __s('Add a mapping', 'glpiidentity') . '</a>';
+
+            // Rules otherwise only reach a person the next time the directory
+            // mentions them, which for a quiet account can be weeks.
+            if (Link::forSource($source->getID()) !== []) {
+                echo "<form method='post' action='" . $e($form) . "' class='d-inline'>";
+                echo Html::hidden('plugin_glpiidentity_sources_id', ['value' => (int) $source->getID()]);
+                echo "<button type='submit' name='reapply' value='1' class='btn btn-outline-secondary' title='"
+                   . __s('Recompute groups and profiles for every account this source manages, from the '
+                       . 'directory groups on record.', 'glpiidentity') . "'>"
+                   . "<i class='ti ti-refresh me-1'></i>" . __s('Apply to everyone now', 'glpiidentity')
+                   . '</button>';
+                Html::closeForm();
+            }
+        }
+        echo '</div>';
 
         if ($rules === []) {
             echo "<div class='alert alert-secondary'>"
                . __s('No mappings yet. Without one, users from this source get only the default '
                    . 'profile set on the source itself.', 'glpiidentity')
                . '</div>';
-        } else {
-            echo "<table class='table table-sm'><thead><tr>"
-               . '<th></th><th>' . __s('Claim', 'glpiidentity') . '</th>'
-               . '<th>' . __s('Condition', 'glpiidentity') . '</th>'
-               . '<th>' . __s('Then', 'glpiidentity') . '</th>'
-               . '<th></th></tr></thead><tbody>';
+            echo '</div>';
 
-            foreach ($rules as $rule) {
-                // `getDropdownName()` returns the row as it is stored, markup and
-                // all — GLPI 11 escapes on output, not on input — so a group name
-                // is attacker-supplied text here: `group` UPDATE is a much more
-                // widely granted right than this page needs, and a SCIM connector
-                // creates groups straight from a `displayName` it was handed. The
-                // badge is ours and stays outside the escape.
-                $target = match ((string) $rule->fields['action']) {
-                    self::ACTION_GROUP   => $e(Dropdown::getDropdownName('glpi_groups', (int) $rule->fields['groups_id'])),
-                    self::ACTION_PROFILE => $e(Dropdown::getDropdownName('glpi_profiles', (int) $rule->fields['profiles_id']))
-                        . ' <span class="text-muted">' . __s('in', 'glpiidentity') . '</span> '
-                        . $e(Dropdown::getDropdownName('glpi_entities', $rule->targetEntity()))
-                        . ((int) $rule->fields['is_dynamic_recursive'] === 1
-                            ? ' <span class="badge bg-azure-lt">' . __s('and below', 'glpiidentity') . '</span>' : ''),
-                    default              => $e($rule->fields['field_name']) . ' = ' . $e($rule->fields['field_value']),
-                };
+            return;
+        }
 
-                echo '<tr' . ((int) $rule->fields['is_active'] === 1 ? '' : " class='text-muted'") . '>';
-                echo '<td>' . (int) $rule->fields['rank_order'] . '</td>';
-                echo '<td><code>' . $e($rule->fields['claim']) . '</code></td>';
-                echo '<td>' . $e(self::operators()[$rule->fields['match_operator']] ?? '')
-                   . ' <strong>' . $e($rule->fields['match_value']) . '</strong></td>';
-                echo '<td>' . $e(self::actions()[$rule->fields['action']] ?? '') . ': ' . $target . '</td>';
-                echo '<td class="text-end">';
-                if ($can) {
-                    echo "<a class='btn btn-sm btn-ghost-secondary' href='" . $e(Url::to('front/mapping.form.php'))
-                       . '?id=' . (int) $rule->getID() . "'><i class='ti ti-edit'></i></a>";
-                }
-                echo '</td></tr>';
+        echo "<table class='table table-sm table-hover align-middle'><thead><tr>"
+           . "<th class='w-1'>#</th>"
+           . '<th>' . __s('When', 'glpiidentity') . '</th>'
+           . '<th>' . __s('Then', 'glpiidentity') . '</th>'
+           . '<th></th></tr></thead><tbody>';
+
+        foreach ($rules as $rule) {
+            $active = (int) $rule->fields['is_active'] === 1;
+
+            echo '<tr' . ($active ? '' : " class='text-muted'") . '>';
+            echo '<td>' . (int) $rule->fields['rank_order'] . '</td>';
+            echo '<td>' . $rule->conditionHtml($source, $e) . '</td>';
+            echo '<td>' . $rule->outcomeHtml($e)
+               . ($active ? '' : ' <span class="badge bg-secondary-lt">' . __s('Inactive') . '</span>') . '</td>';
+            echo '<td class="text-end">';
+            if ($can) {
+                echo "<a class='btn btn-sm btn-ghost-secondary' title='" . __s('Edit') . "' href='" . $e($form)
+                   . '?id=' . (int) $rule->getID() . "'><i class='ti ti-edit'></i></a>";
             }
-
-            echo '</tbody></table>';
+            echo '</td></tr>';
         }
 
-        if ($can) {
-            echo "<a class='btn btn-primary' href='" . $e(Url::to('front/mapping.form.php'))
-               . '?plugin_glpiidentity_sources_id=' . (int) $source->getID() . "'>"
-               . "<i class='ti ti-plus me-1'></i>" . __s('Add a mapping', 'glpiidentity') . '</a>';
-        }
-
+        echo '</tbody></table>';
         echo '</div>';
     }
 
+    /**
+     * The rule form, laid out as the sentence it builds.
+     *
+     * "When [the user is in directory group X], then [grant profile P in
+     * entity E]". Only the fields the chosen action uses are shown, and a line
+     * underneath reads the rule back in words — the whole form used to show
+     * every action's fields at once, with a hint on each saying which action
+     * it belonged to.
+     *
+     * Without JavaScript every row stays visible and the form still works: the
+     * script only hides and summarises, it never decides what is posted.
+     */
     public function showForm($ID, array $options = [])
     {
         $this->initForm($ID, $options);
 
+        $e      = static fn($v): string => htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8');
+        $rand   = mt_rand();
+        $source = new Source();
+        $source->getFromDB((int) $this->fields['plugin_glpiidentity_sources_id']);
+
+        $claim    = (string) $this->fields['claim'];
+        $on_group = $claim === $source->groupsClaim()
+            // A new rule's empty claim is "groups"; on a source that calls it
+            // something else, a new rule is still a group rule.
+            || ($this->isNewItem() && $claim === 'groups');
+
         // Scope wrapper: this form is core-rendered, so without a plugin-owned
         // container the shipped dark-theme CSS could never reach its helper
         // text (see the dark section of the plugin stylesheet).
-        echo "<div class='glpiidentity-scope'>";
+        echo "<div class='glpiidentity-scope' id='glpiidentity-mapping-$rand'>";
         $this->showFormHeader($options);
-
-        $e      = static fn($v): string => htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8');
-        $source = new Source();
-        $source->getFromDB((int) $this->fields['plugin_glpiidentity_sources_id']);
 
         echo "<tr class='tab_bg_1'><td>" . __s('Identity source', 'glpiidentity') . '</td><td>';
         echo $e($source->fields['name'] ?? '');
@@ -485,93 +607,116 @@ class Mapping extends CommonDBChild
         Dropdown::showYesNo('is_active', $this->fields['is_active']);
         echo '</td></tr>';
 
-        echo "<tr class='tab_bg_1'><td>" . __s('Claim', 'glpiidentity') . '</td><td>';
-        echo Html::input('claim', ['value' => $this->fields['claim'], 'placeholder' => 'groups']);
+        // ------------------------------------------------------------- when
+        echo "<tr class='tab_bg_2'><th colspan='4'><i class='ti ti-filter me-1'></i>"
+           . __s('When', 'glpiidentity') . '</th></tr>';
+
+        echo "<tr class='tab_bg_1'><td>" . __s('Match on', 'glpiidentity') . '</td><td>';
+        Dropdown::showFromArray('_match_on', [
+            'group' => __('Directory group membership', 'glpiidentity'),
+            'claim' => __('Another claim or attribute', 'glpiidentity'),
+        ], ['value' => $on_group ? 'group' : 'claim']);
+        echo '</td><td data-glpiidentity-claim>' . __s('Claim', 'glpiidentity') . '</td><td data-glpiidentity-claim>';
+        echo Html::input('claim', ['value' => $on_group ? $source->groupsClaim() : $claim, 'placeholder' => 'department']);
         echo "<div class='form-text'>"
-           . __s('The claim to look at. "groups" is what an IdP sends group membership in, and is '
-               . 'also what SCIM group provisioning fills in.', 'glpiidentity')
-           . '</div></td>';
-        echo '<td>' . __s('Order', 'glpiidentity') . '</td><td>';
-        echo "<input type='number' class='form-control' name='rank_order' value='"
-           . $e($this->fields['rank_order']) . "'>";
-        echo '</td></tr>';
+           . __s('A sign-in claim, or a SCIM attribute such as department or title.', 'glpiidentity')
+           . '</div></td></tr>';
 
         echo "<tr class='tab_bg_1'><td>" . __s('Condition', 'glpiidentity') . '</td><td>';
         Dropdown::showFromArray('match_operator', self::operators(), [
             'value' => $this->fields['match_operator'],
         ]);
         echo '</td><td>' . __s('Value', 'glpiidentity') . '</td><td>';
-        echo Html::input('match_value', ['value' => $this->fields['match_value'], 'size' => 40]);
 
         // The directory's own group names, so the value can be picked rather
-        // than remembered. Only shown when there are some: an empty datalist is
-        // a worse hint than none.
+        // than remembered — a datalist and not a select, because a contains
+        // or regex rule, or a group not synced yet, still needs free text.
         $known = IdpGroup::forSource((int) $this->fields['plugin_glpiidentity_sources_id']);
-        if ($known !== []) {
-            echo "<div class='form-text'>" . __s('Seen from this directory: ', 'glpiidentity');
-            $names = array_map(static fn(IdpGroup $g): string => (string) $g->fields['name'], $known);
-            echo $e(implode(', ', array_slice($names, 0, 12)))
-               . (count($names) > 12 ? ' …' : '');
-            echo '</div>';
+        echo "<input type='text' class='form-control' name='match_value' autocomplete='off' required"
+           . " list='glpiidentity-groups-$rand' value='" . $e($this->fields['match_value']) . "'>";
+        echo "<datalist id='glpiidentity-groups-$rand'>";
+        foreach ($known as $group) {
+            echo "<option value='" . $e($group->fields['name']) . "'></option>";
         }
-        echo '</td></tr>';
-
-        echo "<tr class='tab_bg_1'><td>" . __s('Then', 'glpiidentity') . '</td><td>';
-        Dropdown::showFromArray('action', self::actions(), ['value' => $this->fields['action']]);
-        echo '</td><td colspan="2"></td></tr>';
-
-        echo "<tr class='tab_bg_1'><td>" . Group::getTypeName(1) . '</td><td>';
-        Group::dropdown([
-            'name'   => 'groups_id',
-            'value'  => $this->fields['groups_id'],
-            'entity' => $source->fields['entities_id'] ?? 0,
-            'condition' => ['is_usergroup' => 1],
-        ]);
-        echo "<div class='form-text'>" . __s('Used when the action is "Add to GLPI group".', 'glpiidentity')
-           . '</div></td>';
-        echo '<td>' . Profile::getTypeName(1) . '</td><td>';
-        Profile::dropdown(['name' => 'profiles_id', 'value' => $this->fields['profiles_id']]);
-        echo "<div class='form-text'>" . __s('Used when the action is "Grant GLPI profile".', 'glpiidentity')
+        echo '</datalist>';
+        echo "<div class='form-text' data-glpiidentity-groupmode>"
+           . ($known !== []
+               ? sprintf(
+                   __s('Start typing to pick from the %d groups this directory has sent.', 'glpiidentity'),
+                   count($known)
+               )
+               : __s('No groups received from this directory yet — type the name exactly as the '
+                   . 'directory spells it.', 'glpiidentity'))
            . '</div></td></tr>';
+
+        // ------------------------------------------------------------- then
+        echo "<tr class='tab_bg_2'><th colspan='4'><i class='ti ti-arrow-ramp-right me-1'></i>"
+           . __s('Then', 'glpiidentity') . '</th></tr>';
+
+        echo "<tr class='tab_bg_1'><td>" . __s('Action', 'glpiidentity') . '</td><td>';
+        Dropdown::showFromArray('action', self::actions(), ['value' => $this->fields['action']]);
+        echo '</td><td>' . __s('Order', 'glpiidentity') . '</td><td>';
+        echo "<input type='number' min='0' class='form-control' name='rank_order' value='"
+           . $e($this->fields['rank_order']) . "'>";
+        echo "<div class='form-text'>"
+           . __s('Only matters when two rules set the same user field: the later one wins.', 'glpiidentity')
+           . '</div></td></tr>';
+
+        echo "<tr class='tab_bg_1' data-glpiidentity-action='" . self::ACTION_GROUP . "'><td>"
+           . Group::getTypeName(1) . "</td><td colspan='3'>";
+        Group::dropdown([
+            'name'        => 'groups_id',
+            'value'       => $this->fields['groups_id'],
+            'entity'      => (int) ($source->fields['entities_id'] ?? 0),
+            'entity_sons' => true,
+            'condition'   => ['is_usergroup' => 1],
+        ]);
+        echo '</td></tr>';
 
         // The entity the profile is granted in, limited to the source's own
         // subtree. Listing only those entities is the point: an administrator
         // cannot pick one belonging to another organisation, so the rule form
         // cannot express something the validator would then have to refuse.
         $scope   = self::scopeFor((int) $this->fields['plugin_glpiidentity_sources_id']);
-        $default = $this->targetEntity() ?: (int) ($source->fields['entities_id'] ?? 0);
+        $default = $this->isNewItem() ? (int) ($source->fields['entities_id'] ?? 0) : $this->targetEntity();
 
-        echo "<tr class='tab_bg_1'><td>" . __s('Grant it in', 'glpiidentity') . '</td><td>';
+        echo "<tr class='tab_bg_1' data-glpiidentity-action='" . self::ACTION_PROFILE . "'><td>"
+           . Profile::getTypeName(1) . '</td><td>';
+        Profile::dropdown(['name' => 'profiles_id', 'value' => $this->fields['profiles_id']]);
+        echo '</td><td>' . __s('In entity', 'glpiidentity') . '</td><td>';
         \Entity::dropdown([
-            'name'      => 'target_entities_id',
-            'value'     => $default,
-            'condition' => ['id' => $scope],
+            'name'                => 'target_entities_id',
+            'value'               => $default,
+            'condition'           => ['id' => $scope ?: [-1]],
             'display_emptychoice' => false,
         ]);
-        echo "<div class='form-text'>"
-           . __s('The source\'s own entity, or one beneath it. A rule cannot reach outside the '
-               . 'part of the tree its source owns.', 'glpiidentity')
-           . '</div></td>';
-        echo '<td>' . __s('Sub-entities', 'glpiidentity') . '</td><td>';
-        echo Html::getCheckbox([
+        echo "<div class='mt-2'>" . Html::getCheckbox([
             'name'    => 'is_dynamic_recursive',
             'checked' => (int) $this->fields['is_dynamic_recursive'] === 1,
             'value'   => 1,
-        ]) . ' ' . __s('the grant also applies below that entity', 'glpiidentity');
-        echo '</td></tr>';
+        ]) . ' ' . __s('and every entity below it', 'glpiidentity') . '</div>';
+        echo "<div class='form-text'>"
+           . __s('Any entity at or below this source\'s own. One source can grant different '
+               . 'profiles in different parts of the tree — Technician in one department, '
+               . 'Self-Service in the rest.', 'glpiidentity')
+           . '</div></td></tr>';
 
-        echo "<tr class='tab_bg_1'><td>" . __s('User field', 'glpiidentity') . '</td><td>';
+        echo "<tr class='tab_bg_1' data-glpiidentity-action='" . self::ACTION_FIELD . "'><td>"
+           . __s('User field', 'glpiidentity') . '</td><td>';
         $choices = ['' => Dropdown::EMPTY_VALUE];
         foreach (self::assignableFields() as $name => $meta) {
             $choices[$name] = $meta['label'];
         }
         Dropdown::showFromArray('field_name', $choices, ['value' => $this->fields['field_name']]);
         echo '</td><td>' . __s('Value', 'glpiidentity') . '</td><td>';
-        echo Html::input('field_value', ['value' => $this->fields['field_value'], 'size' => 30]);
+        echo Html::input('field_value', ['value' => $this->fields['field_value']]);
         echo "<div class='form-text'>"
            . __s('For a dropdown field the value is matched by name, and created if it does not '
                . 'exist yet.', 'glpiidentity')
            . '</div></td></tr>';
+
+        echo "<tr class='tab_bg_1'><td colspan='4'>"
+           . "<div class='alert alert-info mb-0 d-none' data-glpiidentity-summary></div></td></tr>";
 
         echo "<tr class='tab_bg_1'><td>" . __s('Comments') . "</td><td colspan='3'>";
         echo "<textarea class='form-control' name='comment' rows='2'>" . $e($this->fields['comment']) . '</textarea>';
@@ -580,7 +725,80 @@ class Mapping extends CommonDBChild
         $this->showFormButtons($options);
         echo '</div>';
 
+        echo Html::scriptBlock(self::formScript("glpiidentity-mapping-$rand"));
+
         return true;
+    }
+
+    /**
+     * Show only the chosen action's fields, and read the rule back in words.
+     *
+     * jQuery rather than addEventListener: GLPI's selects are select2, which
+     * announces a change through jQuery's trigger() — a native listener never
+     * hears it. The summary is built with textContent, so a group or entity
+     * name cannot become markup on its way into it.
+     */
+    private static function formScript(string $root_id): string
+    {
+        $strings = json_encode([
+            'inGroup'    => __('When the user is in directory group %s,', 'glpiidentity'),
+            'inGroupOp'  => __('When one of the user\'s directory groups %1$s %2$s,', 'glpiidentity'),
+            'claimOp'    => __('When %1$s %2$s %3$s,', 'glpiidentity'),
+            'group'      => __('add them to the GLPI group %s.', 'glpiidentity'),
+            'profile'    => __('grant them %1$s in %2$s only.', 'glpiidentity'),
+            'profileRec' => __('grant them %1$s in %2$s and every entity below it.', 'glpiidentity'),
+            'field'      => __('set their %1$s to %2$s.', 'glpiidentity'),
+            'blank'      => __('(not chosen yet)', 'glpiidentity'),
+        ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE);
+
+        $root = json_encode('#' . $root_id);
+
+        return <<<JS
+            (function ($) {
+                const \$root = $($root);
+                const t = $strings;
+                const fmt = (s, ...args) => { let i = 0; return s.replace(/%(\\d+)\\\$s|%s/g, (_, n) => args[n ? n - 1 : i++]); };
+                const q = (v) => (v && v.trim() !== '' && !/^-+$/.test(v.trim())) ? '“' + v.trim() + '”' : t.blank;
+                const field = (name) => \$root.find('[name="' + name + '"]');
+                const chosen = (name) => {
+                    const \$f = field(name);
+                    return \$f.is('select') ? \$f.find('option:selected').text() : String(\$f.val() || '');
+                };
+
+                function sync() {
+                    const action = field('action').val();
+                    const onGroup = field('_match_on').val() === 'group';
+
+                    \$root.find('[data-glpiidentity-action]').each(function () {
+                        $(this).toggle(this.dataset.glpiidentityAction === action);
+                    });
+                    \$root.find('[data-glpiidentity-claim]').toggle(!onGroup);
+                    \$root.find('[data-glpiidentity-groupmode]').toggle(onGroup);
+
+                    const op = field('match_operator').val();
+                    const when = onGroup
+                        ? (op === 'equals' ? fmt(t.inGroup, q(chosen('match_value')))
+                            : fmt(t.inGroupOp, chosen('match_operator'), q(chosen('match_value'))))
+                        : fmt(t.claimOp, q(chosen('claim')), chosen('match_operator'), q(chosen('match_value')));
+
+                    let then = '';
+                    if (action === 'group') {
+                        then = fmt(t.group, q(chosen('groups_id')));
+                    } else if (action === 'profile') {
+                        const below = \$root.find('input[type=checkbox][name="is_dynamic_recursive"]').is(':checked');
+                        then = fmt(below ? t.profileRec : t.profile, q(chosen('profiles_id')), q(chosen('target_entities_id')));
+                    } else {
+                        then = fmt(t.field, q(chosen('field_name')), q(chosen('field_value')));
+                    }
+
+                    const box = \$root.find('[data-glpiidentity-summary]');
+                    box.text(when + ' ' + then).removeClass('d-none');
+                }
+
+                \$root.on('change input', 'select, input', sync);
+                sync();
+            })(jQuery);
+            JS;
     }
 
     public function post_getEmpty()

@@ -8,6 +8,7 @@ namespace GlpiPlugin\Glpiidentity\Scim;
 
 use GlpiPlugin\Glpiidentity\IdpGroup;
 use GlpiPlugin\Glpiidentity\Link;
+use GlpiPlugin\Glpiidentity\Mapping;
 use GlpiPlugin\Glpiidentity\Source;
 use GlpiPlugin\Glpiidentity\Url;
 use User;
@@ -98,7 +99,15 @@ final class GroupResource
      *
      * Off by default. A shared group tree filling up with a dozen organisations'
      * internal vocabulary helps nobody, and the mapping is the supported way to
-     * decide which of a directory's groups deserves to exist in GLPI.
+     * decide which of a directory's groups deserves to exist in GLPI — which is
+     * also why a group an "Add to GLPI group" rule already picks up is not
+     * mirrored as well: the administrator has said where those people go.
+     *
+     * This only makes the group and remembers which one it is. Membership is
+     * the mapper's job ({@see \GlpiPlugin\Glpiidentity\Mapper::plan()}), so it
+     * follows the directory the same way a mapped group does — added, withdrawn
+     * and marked dynamic — and it used to be missing entirely: the group was
+     * created, forgotten, and never had anybody put in it.
      */
     public static function mirror(Source $source, IdpGroup $group): void
     {
@@ -106,26 +115,52 @@ final class GroupResource
             return;
         }
 
-        $entities_id = (int) $source->fields['entities_id'];
-        $glpi_group  = new \Group();
+        $name       = (string) $group->fields['name'];
+        $glpi_group = new \Group();
 
-        if (
-            $glpi_group->getFromDBByCrit([
-                'name'        => $group->fields['name'],
-                'entities_id' => $entities_id,
-            ])
-        ) {
+        // Already mirrored: keep the name in step, since a rename in the
+        // directory is the same group under a new name, not a new group.
+        $current = (int) ($group->fields['groups_id'] ?? 0);
+        if ($current > 0 && $glpi_group->getFromDB($current)) {
+            if ((string) $glpi_group->fields['name'] !== $name) {
+                $glpi_group->update(['id' => $current, 'name' => $name]);
+            }
+
             return;
         }
 
-        $glpi_group->add([
-            'name'         => (string) $group->fields['name'],
-            'entities_id'  => $entities_id,
-            'is_recursive' => (int) $source->fields['is_recursive'],
-            'comment'      => sprintf(
-                __('Mirrored from the %s directory.', 'glpiidentity'),
-                $source->fields['name']
-            ),
-        ]);
+        foreach (Mapping::forSource($source->getID()) as $rule) {
+            if (
+                (string) $rule->fields['action'] === Mapping::ACTION_GROUP
+                && (string) $rule->fields['claim'] === $source->groupsClaim()
+                && $rule->matches([$name])
+            ) {
+                return;
+            }
+        }
+
+        $entities_id = (int) $source->fields['entities_id'];
+
+        // One of the same name in the source's own entity is adopted rather than
+        // duplicated — it is what this used to create, before it recorded which.
+        if (!$glpi_group->getFromDBByCrit(['name' => $name, 'entities_id' => $entities_id])) {
+            $glpi_group = new \Group();
+            $made       = (int) $glpi_group->add([
+                'name'         => $name,
+                'entities_id'  => $entities_id,
+                'is_recursive' => (int) $source->fields['is_recursive'],
+                'is_usergroup' => 1,
+                'comment'      => sprintf(
+                    __('Mirrored from the %s directory.', 'glpiidentity'),
+                    $source->fields['name']
+                ),
+            ]);
+            if ($made <= 0) {
+                return;
+            }
+        }
+
+        $group->update(['id' => $group->getID(), 'groups_id' => (int) $glpi_group->getID()]);
+        $group->fields['groups_id'] = (int) $glpi_group->getID();
     }
 }

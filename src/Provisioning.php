@@ -308,19 +308,30 @@ final class Provisioning
      * from the /Groups endpoint stand in. That is what makes group mapping work
      * for Google Workspace, which sends no groups claim at sign-in at all.
      *
+     * Where there *is* a claim, its values may be ids rather than names. Entra
+     * puts group object ids in the `groups` claim, and object ids are exactly
+     * what it sends as a group's SCIM `externalId` — so each id this source
+     * has been told about gains its display name alongside it. Without that,
+     * a rule written as "is Executive" never matches at sign-in, and the
+     * sign-in then withdraws everything SCIM granted.
+     *
      * @param array<string,string[]> $claims
      * @return array<string,string[]>
      */
     public static function claimsFor(Source $source, int $users_id, array $claims = []): array
     {
-        $groups_claim = (string) ($source->fields['claim_groups'] ?: 'groups');
+        $groups_claim = $source->groupsClaim();
 
         if (($claims[$groups_claim] ?? []) === []) {
             $known = IdpGroup::namesForUser($source->getID(), $users_id);
             if ($known !== []) {
                 $claims[$groups_claim] = $known;
             }
+
+            return $claims;
         }
+
+        $claims[$groups_claim] = IdpGroup::withNames($source->getID(), $claims[$groups_claim]);
 
         return $claims;
     }
