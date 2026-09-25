@@ -71,9 +71,7 @@ class IdpGroup extends CommonDBTM
         foreach (
             getAllDataFromTable(
                 self::getTable(),
-                ['plugin_glpiidentity_sources_id' => $sources_id],
-                false,
-                'name'
+                ['plugin_glpiidentity_sources_id' => $sources_id, 'ORDER' => 'name']
             ) as $row
         ) {
             $group         = new self();

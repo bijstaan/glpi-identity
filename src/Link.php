@@ -198,9 +198,7 @@ class Link extends CommonDBTM
         foreach (
             getAllDataFromTable(
                 self::getTable(),
-                ['plugin_glpiidentity_sources_id' => $sources_id],
-                false,
-                'id'
+                ['plugin_glpiidentity_sources_id' => $sources_id, 'ORDER' => 'id']
             ) as $row
         ) {
             $link         = new self();

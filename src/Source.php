@@ -202,7 +202,7 @@ class Source extends CommonDBTM
     private static function listWhere(array $criteria): array
     {
         $out = [];
-        foreach (getAllDataFromTable(self::getTable(), $criteria, false, 'name') as $row) {
+        foreach (getAllDataFromTable(self::getTable(), ['ORDER' => 'name'] + $criteria) as $row) {
             $source         = new self();
             $source->fields = $row;
             $out[]          = $source;

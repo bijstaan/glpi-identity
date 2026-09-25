@@ -109,6 +109,13 @@ function plugin_init_glpiidentity()
      */
     SessionManager::registerPluginStatelessPath('glpiidentity', '#^/front/scim\.php(/|$)#');
 
+    // GLPI 12's sudo mode. Without this, an administrator who only signs in
+    // through SSO has no password or LDAP bind to re-enter, and core falls back
+    // to a Confirm button that always succeeds. See Oidc\ReAuthStrategy.
+    \Glpi\Security\ReAuth\ReAuthManager::getInstance()->registerStrategy(
+        new \GlpiPlugin\Glpiidentity\Oidc\ReAuthStrategy()
+    );
+
     // The OIDC client secret has to be reversible — it is sent to the token
     // endpoint — so it is encrypted with GLPI's key, and naming the column here
     // is what makes `glpi:security:changekey` re-encrypt it. The SCIM bearer

@@ -1,0 +1,11 @@
+{#
+ # SPDX-License-Identifier: GPL-3.0-or-later
+ # Copyright (C) 2026 Bijstaan
+ #
+ # Body of GLPI's re-authentication prompt for an SSO-linked account. The
+ # prompt's own Verify button submits to front/sso.php/reauth, which sends the
+ # browser to the identity provider.
+ #}
+<p class="text-muted mb-0">
+   {{ __('This action needs you to confirm it is you. You will be taken to your organisation\'s sign-in page, then brought back here to finish.', 'glpiidentity') }}
+</p>

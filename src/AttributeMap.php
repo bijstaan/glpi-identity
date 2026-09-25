@@ -83,9 +83,7 @@ class AttributeMap extends CommonDBChild
         foreach (
             getAllDataFromTable(
                 self::getTable(),
-                ['plugin_glpiidentity_sources_id' => $sources_id],
-                false,
-                'field_name'
+                ['plugin_glpiidentity_sources_id' => $sources_id, 'ORDER' => 'field_name']
             ) as $row
         ) {
             $map         = new self();

@@ -67,7 +67,7 @@ final class Flow
     /**
      * Begin a sign-in: remember what we will need to verify, and say where to go.
      */
-    public static function begin(Source $source, string $return_to = ''): string
+    public static function begin(Source $source, string $return_to = '', int $reauth_users_id = 0): string
     {
         $state    = bin2hex(random_bytes(16));
         $nonce    = bin2hex(random_bytes(16));
@@ -79,6 +79,10 @@ final class Flow
             'nonce'      => $nonce,
             'verifier'   => $verifier,
             'expires'    => time() + self::LIFETIME,
+            // Set only for sudo-mode confirmation: the account the answer must
+            // be for, and when we asked, so an old authentication cannot pass.
+            'reauth_users_id' => $reauth_users_id,
+            'started'         => time(),
         ]);
 
         $challenge = rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=');
@@ -93,6 +97,14 @@ final class Flow
             'code_challenge'        => $challenge,
             'code_challenge_method' => 'S256',
         ];
+
+        if ($reauth_users_id > 0) {
+            // Make the provider authenticate now rather than wave a live
+            // provider session through. `max_age=0` also obliges it to return
+            // `auth_time` (OIDC Core §3.1.2.1), which the callback checks.
+            $parameters['prompt']  = 'login';
+            $parameters['max_age'] = 0;
+        }
 
         $endpoint = $source->endpoint('authorization_endpoint');
 
@@ -176,6 +188,41 @@ final class Flow
         }
 
         return $pending;
+    }
+
+    /**
+     * Hand a verified sudo-mode confirmation to the next, same-site request.
+     *
+     * The provider's callback is a cross-site navigation, so GLPI's
+     * `SameSite=Strict` session cookie is not sent with it: the callback can
+     * verify the token but cannot see the session it would mark. The result
+     * rides in this plugin's Lax cookie, sealed with GLPI's key, for the two
+     * minutes it takes the landing page to forward it to
+     * `sso.php/reauth-done`, which does have the session.
+     */
+    public static function rememberReauth(int $users_id, int $sources_id): void
+    {
+        self::remember([
+            'reauth_confirmed' => $users_id,
+            'sources_id'       => $sources_id,
+            'expires'          => time() + 120,
+        ]);
+    }
+
+    /**
+     * Did the provider report an authentication at or after `$since`?
+     *
+     * A missing `auth_time` fails: it is what `max_age=0` obliges the provider
+     * to send, and without it a still-live provider session is
+     * indistinguishable from a fresh sign-in.
+     *
+     * @param array<string,mixed> $claims verified id token claims
+     */
+    public static function authenticatedSince(array $claims, int $since): bool
+    {
+        $auth_time = $claims['auth_time'] ?? null;
+
+        return is_numeric($auth_time) && (int) $auth_time >= $since - self::LEEWAY;
     }
 
     public static function forget(): void

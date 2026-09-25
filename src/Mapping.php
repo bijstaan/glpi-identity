@@ -262,9 +262,7 @@ class Mapping extends CommonDBChild
         foreach (
             getAllDataFromTable(
                 self::getTable(),
-                ['plugin_glpiidentity_sources_id' => $sources_id],
-                false,
-                'rank_order, id'
+                ['plugin_glpiidentity_sources_id' => $sources_id, 'ORDER' => ['rank_order', 'id']]
             ) as $row
         ) {
             $rule         = new self();
