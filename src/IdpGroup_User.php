@@ -17,13 +17,13 @@ use CommonDBRelation;
  */
 class IdpGroup_User extends CommonDBRelation
 {
-    public static $itemtype_1 = IdpGroup::class;
-    public static $items_id_1 = 'plugin_glpiidentity_idpgroups_id';
+    public static ?string $itemtype_1 = IdpGroup::class;
+    public static ?string $items_id_1 = 'plugin_glpiidentity_idpgroups_id';
 
-    public static $itemtype_2 = 'User';
-    public static $items_id_2 = 'users_id';
+    public static ?string $itemtype_2 = 'User';
+    public static ?string $items_id_2 = 'users_id';
 
-    public static $rightname = 'plugin_glpiidentity_source';
+    public static string $rightname = 'plugin_glpiidentity_source';
 
     public static function getTypeName($nb = 0)
     {

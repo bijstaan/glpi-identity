@@ -25,7 +25,7 @@ class EventLog extends CommonDBTM
 {
     public const TABLE = 'glpi_plugin_glpiidentity_events';
 
-    public static $rightname = 'plugin_glpiidentity_source';
+    public static string $rightname = 'plugin_glpiidentity_source';
 
     // Sign-in
     public const SSO_LOGIN     = 'sso_login';

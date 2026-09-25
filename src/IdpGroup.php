@@ -24,7 +24,7 @@ use Dropdown;
  */
 class IdpGroup extends CommonDBTM
 {
-    public static $rightname = 'plugin_glpiidentity_source';
+    public static string $rightname = 'plugin_glpiidentity_source';
 
     public static function getTypeName($nb = 0)
     {

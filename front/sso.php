@@ -40,7 +40,7 @@ $action = $path === '' ? 'start' : $path;
  * cases a user can act on — a deactivated account, and an unknown domain.
  */
 $bounce = static function (string $message): never {
-    Session::addMessageAfterRedirect(Html::entities_deep($message), false, ERROR);
+    Session::addMessageAfterRedirect(htmlescape($message), false, ERROR);
     Html::redirect((string) ($CFG_GLPI['root_doc'] ?? '') . '/index.php');
 };
 

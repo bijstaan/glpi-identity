@@ -32,9 +32,9 @@ use Profile;
  */
 class Source extends CommonDBTM
 {
-    public static $rightname = 'plugin_glpiidentity_source';
+    public static string $rightname = 'plugin_glpiidentity_source';
 
-    public $dohistory = true;
+    public bool $dohistory = true;
 
     public const DEPROVISION_DISABLE = 'disable';
     public const DEPROVISION_DELETE  = 'delete';
@@ -570,7 +570,7 @@ class Source extends CommonDBTM
     private function validate(array $input): array|false
     {
         $refuse = static function (string $message): false {
-            \Session::addMessageAfterRedirect(Html::entities_deep($message), false, ERROR);
+            \Session::addMessageAfterRedirect(htmlescape($message), false, ERROR);
 
             return false;
         };

@@ -59,12 +59,12 @@ use Html;
  */
 class AttributeMap extends CommonDBChild
 {
-    public static $itemtype = Source::class;
-    public static $items_id = 'plugin_glpiidentity_sources_id';
+    public static string $itemtype = Source::class;
+    public static string $items_id = 'plugin_glpiidentity_sources_id';
 
-    public static $rightname = 'plugin_glpiidentity_source';
+    public static string $rightname = 'plugin_glpiidentity_source';
 
-    public $dohistory = true;
+    public bool $dohistory = true;
 
     public static function getTypeName($nb = 0)
     {
@@ -215,7 +215,7 @@ class AttributeMap extends CommonDBChild
     private function validate(array $input, int $self_id): array|false
     {
         $refuse = static function (string $message): false {
-            \Session::addMessageAfterRedirect(Html::entities_deep($message), false, ERROR);
+            \Session::addMessageAfterRedirect(htmlescape($message), false, ERROR);
 
             return false;
         };
