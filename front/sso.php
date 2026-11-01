@@ -133,12 +133,20 @@ if ($action === 'start') {
 
 // ----------------------------------------------------------------- sudo mode
 
+// Only while ours is the strategy core picked for this person. Being available
+// is not enough: someone with TOTP enrolled must pass TOTP (priority 100), and
+// without this check they could skip it by opening sso.php/reauth directly.
+// Core does the same for its own CAS endpoint. isSelectedStrategy() arrived in
+// 12.0.1; on 12.0.0 there is no public way to ask, so the check is skipped.
+$oidc_selected = static fn(): bool => !method_exists(ReAuthManager::class, 'isSelectedStrategy')
+    || ReAuthManager::getInstance()->isSelectedStrategy(ReAuthStrategy::class);
+
 // GLPI's re-authentication prompt submits here (see Oidc\ReAuthStrategy). The
 // person is signed in and arrived from a GLPI page, so the session is present.
 if ($action === 'reauth') {
     $users_id = (int) Session::getLoginUserID();
     $source   = ReAuthStrategy::sourceFor($users_id);
-    if ($source === null) {
+    if ($source === null || !$oidc_selected()) {
         Html::redirect($prompt);
     }
 
@@ -153,7 +161,7 @@ if ($action === 'reauth-done') {
     Flow::forget();
 
     $users_id = (int) Session::getLoginUserID();
-    if ($users_id <= 0 || (int) ($confirmed['reauth_confirmed'] ?? 0) !== $users_id) {
+    if ($users_id <= 0 || (int) ($confirmed['reauth_confirmed'] ?? 0) !== $users_id || !$oidc_selected()) {
         Html::redirect($prompt);
     }
 
